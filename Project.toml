@@ -3,7 +3,13 @@ uuid = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
 authors = ["Gabriel Baraldi <baraldigabriel@gmail.com> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
+LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
+
 [compat]
+GPUCompiler = "0.24"
+LLVM = "6.2"
 julia = "1.10"
 
 [extras]

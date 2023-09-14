@@ -2,5 +2,5 @@ using AllocCheck
 using Test
 
 @testset "AllocCheck.jl" begin
-    # Write your tests here.
+    check_ir(sin, (Float64,)) # This should pass 
 end
