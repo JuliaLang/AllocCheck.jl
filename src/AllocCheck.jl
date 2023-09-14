@@ -17,10 +17,19 @@ runtime_slug(job::NativeCompilerJob) = "native_$(job.config.target.cpu)-$(hash(j
 uses_julia_runtime(job::NativeCompilerJob) = job.config.target.jlruntime
 
 function create_job(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc)
-    source = methodinstance(typeof(func), Base.to_tuple_type(types))
+    source = methodinstance(Base._stable_typeof(func), Base.to_tuple_type(types))
     target = DefaultCompilerTarget()
     config = CompilerConfig(target, NativeParams(); kernel=false, entry_abi, always_inline=false)
     CompilerJob(source, config)
+end
+
+const alloc_funcs = ["ijl_gc_pool_alloc","ijl_gc_big_alloc"]
+
+function is_alloc_function(name)
+    name in alloc_funcs && return true
+    rx = r"ijl_box_(.)"
+    occursin(rx, name) && return true
+    return false
 end
 
 function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc)
@@ -35,7 +44,7 @@ function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc
             for inst in instructions(block)
                 if isa(inst, LLVM.CallInst)
                     decl = called_operand(inst)
-                    if name(decl) == "ijl_gc_pool_alloc"
+                    if is_alloc_function(name(decl))
                         println("Found Allocation EXTERMINATE!")
                         println(inst)
                     end
