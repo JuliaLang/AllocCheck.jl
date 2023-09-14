@@ -17,7 +17,7 @@ runtime_slug(job::NativeCompilerJob) = "native_$(job.config.target.cpu)-$(hash(j
 uses_julia_runtime(job::NativeCompilerJob) = job.config.target.jlruntime
 
 function create_job(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc)
-    source = methodinstance(F, Base.to_tuple_type(types))
+    source = methodinstance(typeof(func), Base.to_tuple_type(types))
     target = DefaultCompilerTarget()
     config = CompilerConfig(target, NativeParams(); kernel=false, entry_abi, always_inline=false)
     CompilerJob(source, config)
