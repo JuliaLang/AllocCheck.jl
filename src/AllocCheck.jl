@@ -23,16 +23,24 @@ function create_job(@nospecialize(func), @nospecialize(types); entry_abi=:specfu
     CompilerJob(source, config)
 end
 
-const alloc_funcs = ["ijl_gc_pool_alloc","ijl_gc_big_alloc"]
+const alloc_funcs = ["ijl_gc_pool_alloc", "ijl_gc_big_alloc"]
 
 function is_alloc_function(name)
     name in alloc_funcs && return true
     rx = r"ijl_box_(.)"
     occursin(rx, name) && return true
+    rx2 = r"ijl_apply_generic" # Dynamic Dispatch
+    occursin(rx2, name) && return true
     return false
 end
 
-function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc)
+function is_runtime_function(name)
+    rx = r"ijl(.)"
+    occursin(rx, name) && return true
+    return false
+end
+
+function check_ir(@nospecialize(func), @nospecialize(types); strict=false, entry_abi=:specfunc)
     job = create_job(func, types; entry_abi)
     ir = JuliaContext() do ctx
         GPUCompiler.compile(:llvm, job, validate=false)
@@ -44,15 +52,19 @@ function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc
             for inst in instructions(block)
                 if isa(inst, LLVM.CallInst)
                     decl = called_operand(inst)
-                    if is_alloc_function(name(decl))
+                    if is_alloc_function(name(decl)) || strict && is_runtime_function(name(decl))
+                        diloc = metadata(inst)[LLVM.MD_dbg]::LLVM.DILocation
+                        discope = LLVM.scope(diloc)
+                        difile = LLVM.file(discope) #TODO: Print nice debug
                         println("Found Allocation EXTERMINATE!")
                         println(inst)
+                        return inst, mod
                     end
                 end
             end
         end
     end
-    ir
+    return nothing
 end
 
 
