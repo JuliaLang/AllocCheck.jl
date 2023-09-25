@@ -38,7 +38,7 @@ end
 # this works by looking up the debug information of the instruction, and inspecting the call
 # sites of the containing function. if there's only one, repeat the process from that call.
 # finally, the debug information is converted to a Julia stack trace.
-function backtrace_(inst::LLVM.Instruction, bt = StackTraces.StackFrame[]; compiled::Union{Nothing,Dict{Any,Any}} = nothing)
+function backtrace_(inst::LLVM.Instruction, bt=StackTraces.StackFrame[]; compiled::Union{Nothing,Dict{Any,Any}}=nothing)
     done = Set{LLVM.Instruction}()
     while true
         if in(inst, done)
@@ -54,7 +54,7 @@ function backtrace_(inst::LLVM.Instruction, bt = StackTraces.StackFrame[]; compi
                 scope = LLVM.scope(loc)
                 if scope !== nothing
                     emitted_name = LLVM.name(f)
-                    name = replace(LLVM.name(scope), r";$"=>"")
+                    name = replace(LLVM.name(scope), r";$" => "")
                     file = LLVM.file(scope)
                     path = joinpath(LLVM.directory(file), LLVM.filename(file))
                     line = LLVM.line(loc)
@@ -68,7 +68,7 @@ function backtrace_(inst::LLVM.Instruction, bt = StackTraces.StackFrame[]; compi
                         end
                     end
                     push!(bt, StackTraces.StackFrame(Symbol(name), Symbol(path), line,
-                                                     linfo, from_c, inlined, 0))
+                        linfo, from_c, inlined, 0))
                 end
                 loc = LLVM.inlined_at(loc)
             end
@@ -126,6 +126,28 @@ struct AllocInstance
     backtrace::Vector{Base.StackTraces.StackFrame}
 end
 
+"""
+check_ir(func, types; entry_abi=:specfunc, ret_mod=false)
+
+Compiles the given function and types to LLVM IR and checks for allocations.
+Returns a vector of `AllocInstance` structs, each containing a `CallInst` and a backtrace.
+
+# Example
+```jldoctest
+julia> function foo(x::Int, y::Int)
+           z = x + y
+           return z
+       end
+foo (generic function with 1 method)
+
+julia> types = (Int, Int)
+(Int64, Int64)
+
+julia> allocs = check_ir(foo, types)
+AllocCheck.AllocInstance[]
+```
+
+"""
 function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false)
     job = create_job(func, types; entry_abi)
     allocs = AllocInstance[]
