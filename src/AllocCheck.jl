@@ -5,6 +5,8 @@ using GPUCompiler: safe_name
 using LLVM
 # Write your package code here.
 
+include("allocfunc.jl")
+
 module Runtime end
 
 struct NativeParams <: GPUCompiler.AbstractCompilerParams end
@@ -24,16 +26,6 @@ function create_job(@nospecialize(func), @nospecialize(types); entry_abi=:specfu
     CompilerJob(source, config)
 end
 
-const alloc_funcs = ["ijl_gc_pool_alloc", "ijl_gc_big_alloc"]
-
-function is_alloc_function(name)
-    name in alloc_funcs && return true
-    rx = r"ijl_box_(.)"
-    occursin(rx, name) && return true
-    rx2 = r"ijl_apply_generic" # Dynamic Dispatch
-    occursin(rx2, name) && return true
-    return false
-end
 
 function is_runtime_function(name)
     rx = r"ijl(.)"
@@ -46,7 +38,7 @@ end
 # this works by looking up the debug information of the instruction, and inspecting the call
 # sites of the containing function. if there's only one, repeat the process from that call.
 # finally, the debug information is converted to a Julia stack trace.
-function backtrace(inst::LLVM.Instruction, bt = StackTraces.StackFrame[]; compiled::Union{Nothing,Dict{Any,Any}} = nothing)
+function backtrace_(inst::LLVM.Instruction, bt = StackTraces.StackFrame[]; compiled::Union{Nothing,Dict{Any,Any}} = nothing)
     done = Set{LLVM.Instruction}()
     while true
         if in(inst, done)
@@ -112,40 +104,63 @@ function backtrace(inst::LLVM.Instruction, bt = StackTraces.StackFrame[]; compil
     return bt
 end
 
-function check_ir(@nospecialize(func), @nospecialize(types); strict=false, entry_abi=:specfunc)
-    job = create_job(func, types; entry_abi)
-    ir = JuliaContext() do ctx
-        GPUCompiler.compile(:llvm, job, validate=false)
-        # Implement checks ;)
+function build_newpm_pipeline!(pb::PassBuilder, mpm::NewPMModulePassManager, speedup=2, size=0, lower_intrinsic=true,
+    dump_native=false, external_use=false, llvm_only=false,)
+    ccall(:jl_build_newpm_pipeline, Cvoid, (LLVM.API.LLVMModulePassManagerRef, LLVM.API.LLVMPassBuilderRef, Cint, Cint, Cint, Cint, Cint, Cint),
+        mpm, pb, speedup, size, lower_intrinsic, dump_native, external_use, llvm_only)
+end
+
+function optimize!(@nospecialize(job::CompilerJob), mod::LLVM.Module)
+    triple = GPUCompiler.llvm_triple(job.config.target)
+    tm = GPUCompiler.llvm_machine(job.config.target)
+    @dispose pb = LLVM.PassBuilder(tm) begin
+        @dispose mpm = LLVM.NewPMModulePassManager(pb) begin
+            build_newpm_pipeline!(pb, mpm)
+            run!(mpm, mod, tm)
+        end
     end
-    mod = ir[1]
-    # display(mod)
-    (; compiled) = ir[2]
-    for f in functions(mod)
-        for block in blocks(f)
-            for inst in instructions(block)
-                if isa(inst, LLVM.CallInst)
-                    decl = called_operand(inst)
-                    if is_alloc_function(name(decl)) || strict && is_runtime_function(name(decl))
-                        diloc = metadata(inst)[LLVM.MD_dbg]::LLVM.DILocation
-                        discope = LLVM.scope(diloc)
-                        difile = LLVM.file(discope) #TODO: Print nice debug
-                        println("Found Allocation EXTERMINATE!")
-                        println(inst)
+end
 
-                        # Print backtrace
-                        bt = backtrace(inst; compiled)
-                        # @assert length(bt) != 0
-                        Base.show_backtrace(stdout, bt)
-                        println()
+struct AllocInstance
+    inst::LLVM.CallInst
+    backtrace::Vector{Base.StackTraces.StackFrame}
+end
 
-                        return inst, mod
+function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false)
+    job = create_job(func, types; entry_abi)
+    allocs = AllocInstance[]
+    mod = JuliaContext() do ctx
+        ir = GPUCompiler.compile(:llvm, job, validate=false)
+        mod = ir[1]
+        optimize!(job, mod)
+        # display(mod)
+        (; compiled) = ir[2]
+        for f in functions(mod)
+            for block in blocks(f)
+                for inst in instructions(block)
+                    if isa(inst, LLVM.CallInst)
+                        rename_ir!(job, inst)
+                        decl = called_operand(inst)
+                        if is_alloc_function(name(decl))
+                            typ = guess_julia_type(inst)
+                            println("Allocation of Type: ", typ, " in ")
+                            println(inst)
+                            # Print backtrace
+                            bt = backtrace_(inst; compiled)
+                            # @assert length(bt) != 0
+                            Base.show_backtrace(stdout, bt)
+                            println()
+                            push!(allocs, AllocInstance(inst, bt))
+                        end
                     end
                 end
             end
         end
+        mod
     end
-    return nothing
+
+    ret_mod && return mod
+    return allocs
 end
 
 
