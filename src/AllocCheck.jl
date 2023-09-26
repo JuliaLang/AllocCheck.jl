@@ -6,6 +6,7 @@ using LLVM
 # Write your package code here.
 
 include("allocfunc.jl")
+include("utils.jl")
 
 module Runtime end
 
@@ -126,8 +127,29 @@ struct AllocInstance
     backtrace::Vector{Base.StackTraces.StackFrame}
 end
 
+function Base.show(io::IO, alloc::AllocInstance)
+    typ = guess_julia_type(alloc.inst)
+
+    if length(alloc.backtrace) == 0
+        Base.println(io, "Allocation of ", typ, " in ")
+        Base.println(io, alloc.inst)
+    else
+        Base.println(io, "Allocation of ", typ, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
+
+        # Print code excerpt of allocation site
+        source = open(fixup_source_path(alloc.backtrace[1].file))
+        Base.print(io, "  | ")
+        Base.println(io, strip(readlines(source)[alloc.backtrace[1].line]))
+        close(source)
+
+        # Print backtrace
+        Base.show_backtrace(io, alloc.backtrace)
+        Base.println(io)
+    end
+end
+
 """
-check_ir(func, types; entry_abi=:specfunc, ret_mod=false)
+check_allocs(func, types; entry_abi=:specfunc, ret_mod=false)
 
 Compiles the given function and types to LLVM IR and checks for allocations.
 Returns a vector of `AllocInstance` structs, each containing a `CallInst` and a backtrace.
@@ -140,15 +162,12 @@ julia> function foo(x::Int, y::Int)
        end
 foo (generic function with 1 method)
 
-julia> types = (Int, Int)
-(Int64, Int64)
-
-julia> allocs = check_ir(foo, types)
+julia> allocs = check_allocs(foo, (Int, Int))
 AllocCheck.AllocInstance[]
 ```
 
 """
-function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false)
+function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false)
     job = create_job(func, types; entry_abi)
     allocs = AllocInstance[]
     mod = JuliaContext() do ctx
@@ -164,15 +183,9 @@ function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc
                         rename_ir!(job, inst)
                         decl = called_operand(inst)
                         if is_alloc_function(name(decl))
-                            typ = guess_julia_type(inst)
-                            println("Allocation of Type: ", typ, " in ")
-                            println(inst)
-                            # Print backtrace
                             bt = backtrace_(inst; compiled)
-                            # @assert length(bt) != 0
-                            Base.show_backtrace(stdout, bt)
-                            println()
-                            push!(allocs, AllocInstance(inst, bt))
+                            alloc = AllocInstance(inst, bt)
+                            push!(allocs, alloc)
                         end
                     end
                 end
@@ -186,6 +199,6 @@ function check_ir(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc
 end
 
 
-export check_ir
+export check_allocs
 
 end
