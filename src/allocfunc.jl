@@ -108,7 +108,6 @@ function rename_ir!(job, inst::LLVM.CallInst)
     world = job.world
     interp = GPUCompiler.get_interpreter(job)
     method_table = Core.Compiler.method_table(interp)
-    bt = backtrace(inst)
     dest = called_operand(inst)
 
     if isa(dest, ConstantExpr)
