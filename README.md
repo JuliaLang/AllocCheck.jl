@@ -16,23 +16,16 @@ julia> linsolve(a, b) = a \ b
 
 julia> length(check_allocs(linsolve, (Matrix{Float64}, Vector{Float64})))
 175
+
+julia> length(check_allocs(sin, (Float64,)))
+2
+
+julia> length(check_allocs(sin, (Float64,); ignore_throw=true)) # ignore allocations that only happen when throwing errors
+0
 ```
 
-#### Known Limitations
+#### Limitations
 
- 1. Error paths
+ 1. Runtime dispatch
 
-   Allocations in error-throwing paths are not distinguished from other allocations:
-
-```julia
-julia> check_allocs(sin, (Float64,))[1]
-
-Allocation of Float64 in ./special/trig.jl:28
-  | @noinline sin_domain_error(x) = throw(DomainError(x, "sin(x) is only defined for finite x."))
-
-Stacktrace:
- [1] sin_domain_error(x::Float64)
-   @ Base.Math ./special/trig.jl:28
- [2] sin(x::Float64)
-   @ Base.Math ./special/trig.jl:39
-```
+   Any runtime dispatch is conservatively assumed to allocate.

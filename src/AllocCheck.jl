@@ -148,6 +148,39 @@ function Base.show(io::IO, alloc::AllocInstance)
     end
 end
 
+function rename_calls_and_throws!(f::LLVM.Function, job)
+
+    # In order to detect whether an instruction executes only when
+    # throwing an error, we re-write all throws to pass through the
+    # same basic block and then we check whether the instruction
+    # is post-dominated by this "any_throw" basic block.
+    any_throw = BasicBlock(f, "any_throw")
+
+    builder = IRBuilder()
+    position!(builder, any_throw)
+    throw_ret = ret!(builder) # Dummy instruction for dominance test
+    for block in blocks(f)
+        for inst in instructions(block)
+            if isa(inst, LLVM.CallInst)
+                rename_ir!(job, inst)
+
+                decl = called_operand(inst)
+                # TODO: Identify catch blocks and filter any functions
+                #       called only in throw-only contexts
+                if name(decl) == "ijl_throw" || name(decl) == "llvm.trap"
+                    position!(builder, block)
+                    brinst = br!(builder, any_throw)
+                end
+            end
+        end
+    end
+    dispose(builder)
+
+    # Return the "any_throw" instruction so that it can be used
+    # for post-dominance tests.
+    return throw_ret
+end
+
 """
 check_allocs(func, types; entry_abi=:specfunc, ret_mod=false)
 
@@ -167,7 +200,7 @@ AllocCheck.AllocInstance[]
 ```
 
 """
-function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false)
+function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false, ignore_throw=false)
     job = create_job(func, types; entry_abi)
     allocs = AllocInstance[]
     mod = JuliaContext() do ctx
@@ -177,12 +210,16 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
         # display(mod)
         (; compiled) = ir[2]
         for f in functions(mod)
+            throw = rename_calls_and_throws!(f, job)
+            postdom = LLVM.PostDomTree(f)
             for block in blocks(f)
                 for inst in instructions(block)
                     if isa(inst, LLVM.CallInst)
-                        rename_ir!(job, inst)
                         decl = called_operand(inst)
                         if is_alloc_function(name(decl))
+                            throw_only = dominates(postdom, throw, inst)
+                            ignore_throw && throw_only && continue
+
                             bt = backtrace_(inst; compiled)
                             alloc = AllocInstance(inst, bt)
                             push!(allocs, alloc)
@@ -190,6 +227,7 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
                     end
                 end
             end
+            dispose(postdom)
         end
         mod
     end
