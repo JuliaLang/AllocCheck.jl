@@ -151,34 +151,61 @@ end
 function rename_calls_and_throws!(f::LLVM.Function, job)
 
     # In order to detect whether an instruction executes only when
-    # throwing an error, we re-write all throws to pass through the
-    # same basic block and then we check whether the instruction
-    # is post-dominated by this "any_throw" basic block.
+    # throwing an error, we re-write all throw/catches to pass through
+    # the same basic block and then we check whether the instruction
+    # is (post-)dominated by this "any_throw" / "any_catch" basic block.
+    #
+    # The goal is to check whether an inst always flows into some _some_
+    # throw (or from some catch), rather than looking for a specific
+    # throw/catch that the instruction always flows into.
     any_throw = BasicBlock(f, "any_throw")
+    any_catch = BasicBlock(f, "any_catch")
 
     builder = IRBuilder()
+
     position!(builder, any_throw)
-    throw_ret = ret!(builder) # Dummy instruction for dominance test
+    throw_ret = ret!(builder)                                # Dummy inst for post-dominance test
+
+    position!(builder, any_catch)
+    undef_i32 = UndefValue(LLVM.Int32Type())
+    catch_switch = switch!(builder, undef_i32, any_catch, 0) # Dummy inst for dominance test
+
     for block in blocks(f)
         for inst in instructions(block)
             if isa(inst, LLVM.CallInst)
                 rename_ir!(job, inst)
-
                 decl = called_operand(inst)
-                # TODO: Identify catch blocks and filter any functions
-                #       called only in throw-only contexts
+
+                # `throw`: Add pseudo-edge to any_throw
                 if name(decl) == "ijl_throw" || name(decl) == "llvm.trap"
                     position!(builder, block)
                     brinst = br!(builder, any_throw)
                 end
+
+                # `catch`: Add pseudo-edge from any_catch
+                if name(decl) == "__sigsetjmp"
+                    icmp_ = user(only(uses(inst))) # Asserts one usage
+                    @assert icmp_ isa LLVM.ICmpInst
+                    br_ = user(only(uses(icmp_)))  # Asserts one usage
+                    @assert br_ isa LLVM.BrInst
+
+                    # Rewrite the jump to this `catch` block as an indirect jump
+                    # from a common `any_catch` block
+                    _, catch_target = successors(br_)
+                    successors(br_)[2] = any_catch
+                    branch_index = ConstantInt(length(successors(catch_switch)))
+                    LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
+                end
+
+                # TODO: Filter any functions called only in throw-only contexts
             end
         end
     end
     dispose(builder)
 
-    # Return the "any_throw" instruction so that it can be used
-    # for post-dominance tests.
-    return throw_ret
+    # Return the "any_throw" and "any_catch" instructions so that they
+    # can be used for (post-)dominance tests.
+    return throw_ret, catch_switch
 end
 
 """
@@ -210,15 +237,19 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
         # display(mod)
         (; compiled) = ir[2]
         for f in functions(mod)
-            throw = rename_calls_and_throws!(f, job)
-            postdom = LLVM.PostDomTree(f)
+            throw_, catch_ = rename_calls_and_throws!(f, job)
+            domtree = LLVM.DomTree(f)
+            postdomtree = LLVM.PostDomTree(f)
             for block in blocks(f)
                 for inst in instructions(block)
                     if isa(inst, LLVM.CallInst)
                         decl = called_operand(inst)
                         if is_alloc_function(name(decl))
-                            throw_only = dominates(postdom, throw, inst)
+                            throw_only = dominates(postdomtree, throw_, inst)
                             ignore_throw && throw_only && continue
+
+                            catch_only = dominates(domtree, catch_, inst)
+                            ignore_throw && catch_only && continue
 
                             bt = backtrace_(inst; compiled)
                             alloc = AllocInstance(inst, bt)
@@ -227,7 +258,8 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
                     end
                 end
             end
-            dispose(postdom)
+            dispose(postdomtree)
+            dispose(domtree)
         end
         mod
     end
