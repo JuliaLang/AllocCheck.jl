@@ -196,8 +196,6 @@ function rename_calls_and_throws!(f::LLVM.Function, job)
                     branch_index = ConstantInt(length(successors(catch_switch)))
                     LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
                 end
-
-                # TODO: Filter any functions called only in throw-only contexts
             end
         end
     end
@@ -235,8 +233,13 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
         mod = ir[1]
         optimize!(job, mod)
         # display(mod)
-        (; compiled) = ir[2]
-        for f in functions(mod)
+        (; entry, compiled) = ir[2]
+
+        worklist = LLVM.Function[ entry ]
+        seen = LLVM.Function[ entry ]
+        while !isempty(worklist)
+            f = pop!(worklist)
+
             throw_, catch_ = rename_calls_and_throws!(f, job)
             domtree = LLVM.DomTree(f)
             postdomtree = LLVM.PostDomTree(f)
@@ -244,16 +247,22 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
                 for inst in instructions(block)
                     if isa(inst, LLVM.CallInst)
                         decl = called_operand(inst)
+
+                        throw_only = dominates(postdomtree, throw_, inst)
+                        ignore_throw && throw_only && continue
+
+                        catch_only = dominates(domtree, catch_, inst)
+                        ignore_throw && catch_only && continue
+
                         if is_alloc_function(name(decl))
-                            throw_only = dominates(postdomtree, throw_, inst)
-                            ignore_throw && throw_only && continue
-
-                            catch_only = dominates(domtree, catch_, inst)
-                            ignore_throw && catch_only && continue
-
                             bt = backtrace_(inst; compiled)
                             alloc = AllocInstance(inst, bt)
                             push!(allocs, alloc)
+                        end
+
+                        if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
+                            push!(worklist, decl)
+                            push!(seen, decl)
                         end
                     end
                 end
