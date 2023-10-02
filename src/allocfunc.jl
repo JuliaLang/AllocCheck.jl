@@ -1,49 +1,21 @@
 # List of methods to location of arg which is the mi/function, then start of args
 const generic_method_offsets = Dict{String, Tuple{Int,Int}}(("jl_f__apply_latest" => (2,3), "ijl_f__apply_latest" => (2,3), "jl_f__call_latest" => (2,3), "ijl_f__call_latest" => (2,3), "jl_f_invoke" => (2,3), "jl_invoke" => (1,3), "jl_apply_generic" => (1,2), "ijl_f_invoke" => (2,3), "ijl_invoke" => (1,3), "ijl_apply_generic" => (1,2)))
 
-const alloc_funcs = (
-        "ijl_f__apply_latest", "ijl_f__call_latest", "ijl_f_invoke", "ijl_invoke", "ijl_apply_generic",
-        "ijl_alloc_array_1d", "ijl_alloc_array_2d", "ijl_alloc_array_3d",
-        "ijl_new_array",
-        "ijl_array_copy",
-        "ijl_alloc_string",
-        "ijl_in_threaded_region", "ijl_enter_threaded_region", "ijl_exit_threaded_region", "ijl_set_task_tid", "ijl_new_task",
-        "ijl_array_grow_beg",
-        "ijl_array_grow_end",
-        "ijl_array_grow_at",
-        "ijl_array_del_beg",
-        "ijl_array_del_end",
-        "ijl_array_del_at",
-        "ijl_gc_add_finalizer_th",
-        "ijl_symbol_n", "ijl_",
-        "ijl_reshape_array", "ijl_reshape_array",
-        "ijl_matching_methods", "ijl_matching_methods",
-        "ijl_array_sizehint", "ijl_array_sizehint",
-        "ijl_get_keyword_sorter", "ijl_get_keyword_sorter",
-        "ijl_ptr_to_array",
-        "ijl_box_float32",
-        "ijl_box_float64",
-        "ijl_box_int16",
-        "ijl_box_int32",
-        "ijl_box_int64",
-        "ijl_box_int8",
-        "ijl_box_slotnumber",
-        "ijl_box_ssavalue",
-        "ijl_box_uint16",
-        "ijl_box_uint32",
-        "ijl_box_uint64",
-        "ijl_box_uint8",
-        "ijl_box_uint8pointer",
-        "ijl_box_voidpointer",
-        "ijl_ptr_to_array_1d",
-        "ijl_eqtable_get", "ijl_eqtable_get",
-        "ijl_get_nth_field_checked",
-        "ijl_gc_alloc_typed", "ijl_gc_pool_alloc", "ijl_gc_big_alloc",
-        "ijl_gc_pool_alloc_instrumented", "ijl_gc_big_alloc_instrumented"
-    )
+
+const known_nonalloc_funcs = [
+    "jl_egal__unboxed", "ijl_egal__unboxed",
+    "jl_lock_value", "ijl_lock_value",
+    "jl_unlock_value", "ijl_unlock_value",
+    "jl_get_nth_field_noalloc", "ijl_get_nth_field_noalloc",
+]
 
 function is_alloc_function(name)
-    name in alloc_funcs
+    maybe_alloc = occursin(r"(ijl_|jl_).*", name)
+    if maybe_alloc
+        name in known_nonalloc_funcs && return false
+        return true
+    end
+    return false
 end
 
 function guess_julia_type(val::LLVM.Value, typeof=true)
