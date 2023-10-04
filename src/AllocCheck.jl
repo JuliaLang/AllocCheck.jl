@@ -137,15 +137,88 @@ function Base.show(io::IO, alloc::AllocInstance)
         Base.println(io, "Allocation of ", typ, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
 
         # Print code excerpt of allocation site
-        source = open(fixup_source_path(alloc.backtrace[1].file))
-        Base.print(io, "  | ")
-        Base.println(io, strip(readlines(source)[alloc.backtrace[1].line]))
-        close(source)
+        try
+            source = open(fixup_source_path(alloc.backtrace[1].file))
+            Base.print(io, "  | ")
+            Base.println(io, strip(readlines(source)[alloc.backtrace[1].line]))
+            close(source)
+        catch
+            Base.print(io, "  | (source not available)")
+        end
 
         # Print backtrace
         Base.show_backtrace(io, alloc.backtrace)
         Base.println(io)
     end
+end
+
+function rename_calls_and_throws!(f::LLVM.Function, job)
+
+    # In order to detect whether an instruction executes only when
+    # throwing an error, we re-write all throw/catches to pass through
+    # the same basic block and then we check whether the instruction
+    # is (post-)dominated by this "any_throw" / "any_catch" basic block.
+    #
+    # The goal is to check whether an inst always flows into some _some_
+    # throw (or from some catch), rather than looking for a specific
+    # throw/catch that the instruction always flows into.
+    any_throw = BasicBlock(f, "any_throw")
+    any_catch = BasicBlock(f, "any_catch")
+
+    builder = IRBuilder()
+
+    position!(builder, any_throw)
+    throw_ret = ret!(builder)                                # Dummy inst for post-dominance test
+
+    position!(builder, any_catch)
+    undef_i32 = UndefValue(LLVM.Int32Type())
+    catch_switch = switch!(builder, undef_i32, any_catch, 0) # Dummy inst for dominance test
+
+    for block in blocks(f)
+        for inst in instructions(block)
+            if isa(inst, LLVM.CallInst)
+                rename_ir!(job, inst)
+                decl = called_operand(inst)
+
+                # `throw`: Add pseudo-edge to any_throw
+                if name(decl) == "ijl_throw" || name(decl) == "llvm.trap"
+                    position!(builder, block)
+                    brinst = br!(builder, any_throw)
+                end
+
+                # `catch`: Add pseudo-edge from any_catch
+                if name(decl) == "__sigsetjmp"
+                    icmp_ = user(only(uses(inst))) # Asserts one usage
+                    @assert icmp_ isa LLVM.ICmpInst
+                    br_ = user(only(uses(icmp_)))  # Asserts one usage
+                    @assert br_ isa LLVM.BrInst
+
+                    # Rewrite the jump to this `catch` block as an indirect jump
+                    # from a common `any_catch` block
+                    _, catch_target = successors(br_)
+                    successors(br_)[2] = any_catch
+                    branch_index = ConstantInt(length(successors(catch_switch)))
+                    LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
+                end
+            elseif isa(inst, LLVM.UnreachableInst)
+
+                # By assuming forward-progress, we know that any code post-dominated
+                # by an `unreachable` must either be dead or contain a statically-known
+                # throw().
+                #
+                # This can be useful in, e.g., cases where Julia codegen knows that a
+                # dynamic dispatch is must-throw but the LLVM IR does not otherwise
+                # reflect this information.
+                position!(builder, block)
+                brinst = br!(builder, any_throw)
+            end
+        end
+    end
+    dispose(builder)
+
+    # Return the "any_throw" and "any_catch" instructions so that they
+    # can be used for (post-)dominance tests.
+    return throw_ret, catch_switch
 end
 
 """
@@ -167,7 +240,7 @@ AllocCheck.AllocInstance[]
 ```
 
 """
-function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false)
+function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false, ignore_throw=false)
     job = create_job(func, types; entry_abi)
     allocs = AllocInstance[]
     mod = JuliaContext() do ctx
@@ -175,21 +248,42 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
         mod = ir[1]
         optimize!(job, mod)
         # display(mod)
-        (; compiled) = ir[2]
-        for f in functions(mod)
+        (; entry, compiled) = ir[2]
+
+        worklist = LLVM.Function[ entry ]
+        seen = LLVM.Function[ entry ]
+        while !isempty(worklist)
+            f = pop!(worklist)
+
+            throw_, catch_ = rename_calls_and_throws!(f, job)
+            domtree = LLVM.DomTree(f)
+            postdomtree = LLVM.PostDomTree(f)
             for block in blocks(f)
                 for inst in instructions(block)
                     if isa(inst, LLVM.CallInst)
-                        rename_ir!(job, inst)
                         decl = called_operand(inst)
+
+                        throw_only = dominates(postdomtree, throw_, inst)
+                        ignore_throw && throw_only && continue
+
+                        catch_only = dominates(domtree, catch_, inst)
+                        ignore_throw && catch_only && continue
+
                         if is_alloc_function(name(decl))
                             bt = backtrace_(inst; compiled)
                             alloc = AllocInstance(inst, bt)
                             push!(allocs, alloc)
                         end
+
+                        if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
+                            push!(worklist, decl)
+                            push!(seen, decl)
+                        end
                     end
                 end
             end
+            dispose(postdomtree)
+            dispose(domtree)
         end
         mod
     end

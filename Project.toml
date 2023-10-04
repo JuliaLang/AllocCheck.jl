@@ -4,13 +4,12 @@ authors = ["JuliaHub Inc."]
 version = "1.0.0-DEV"
 
 [deps]
-Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
 LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 
 [compat]
 GPUCompiler = "0.24"
-LLVM = "6.2"
+LLVM = "6.3"
 julia = "1.10"
 
 [extras]
