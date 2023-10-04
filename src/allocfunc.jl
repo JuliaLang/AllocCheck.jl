@@ -1,5 +1,5 @@
 # List of methods to location of arg which is the mi/function, then start of args
-const generic_method_offsets = Dict{String, Tuple{Int,Int}}(("jl_f__apply_latest" => (2,3), "ijl_f__apply_latest" => (2,3), "jl_f__call_latest" => (2,3), "ijl_f__call_latest" => (2,3), "jl_f_invoke" => (2,3), "jl_invoke" => (1,3), "jl_apply_generic" => (1,2), "ijl_f_invoke" => (2,3), "ijl_invoke" => (1,3), "ijl_apply_generic" => (1,2)))
+const generic_method_offsets = Dict{String,Tuple{Int,Int}}(("jl_f__apply_latest" => (2, 3), "ijl_f__apply_latest" => (2, 3), "jl_f__call_latest" => (2, 3), "ijl_f__call_latest" => (2, 3), "jl_f_invoke" => (2, 3), "jl_invoke" => (1, 3), "jl_apply_generic" => (1, 2), "ijl_f_invoke" => (2, 3), "ijl_invoke" => (1, 3), "ijl_apply_generic" => (1, 2)))
 
 
 const known_nonalloc_funcs = (
@@ -7,18 +7,18 @@ const known_nonalloc_funcs = (
     "jl_lock_value", "ijl_lock_value",
     "jl_unlock_value", "ijl_unlock_value",
     "jl_get_nth_field_noalloc", "ijl_get_nth_field_noalloc",
-    "jl_load_and_lookup","ijl_load_and_lookup",
-    "jl_lazy_load_and_lookup","ijl_lazy_load_and_lookup",
-    "jl_box_bool","ijl_box_bool",
-    "jl_box_int8","ijl_box_int8",
-    "jl_box_uint8","ijl_box_uint8",
+    "jl_load_and_lookup", "ijl_load_and_lookup",
+    "jl_lazy_load_and_lookup", "ijl_lazy_load_and_lookup",
+    "jl_box_bool", "ijl_box_bool",
+    "jl_box_int8", "ijl_box_int8",
+    "jl_box_uint8", "ijl_box_uint8",
     r"(ijl|jl)_unbox.*"
 )
 
 function is_alloc_function(name)
     maybe_alloc = occursin(r"(ijl_|jl_).*", name)
     if maybe_alloc
-        any(x->contains(name, x), known_nonalloc_funcs) && return false
+        any(x -> contains(name, x), known_nonalloc_funcs) && return false
         return true
     end
     return false
@@ -93,18 +93,16 @@ function rename_ir!(job, inst::LLVM.CallInst)
         if occursin("bitcast", string(dest))
             fn_got = LLVM.Value(LLVM.LLVM.API.LLVMGetOperand(fptr, 0))
             fname = name(fn_got)
-            if startswith(fname, "jlplt_")
+            if startswith(fname, "jlplt_") && endswith(fname, "_got")
                 fname = fname[7:end]
                 fname = replace(fname, r"_\d+_got$" => "")
+                mod = LLVM.parent(LLVM.parent(LLVM.parent(inst)))
+                lfn = LLVM.API.LLVMGetNamedFunction(mod, fname)
+                if lfn == C_NULL
+                    lfn = LLVM.API.LLVMAddFunction(mod, Symbol(fname), LLVM.API.LLVMGetCalledFunctionType(inst))
+                end
+                LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst) - 1, lfn)
             end
-            mod = LLVM.parent(LLVM.parent(LLVM.parent(inst)))
-            lfn = LLVM.API.LLVMGetNamedFunction(mod, fname)
-            if lfn == C_NULL
-                lfn = LLVM.API.LLVMAddFunction(mod, Symbol(fname), LLVM.API.LLVMGetCalledFunctionType(inst))
-            else
-                lfn = LLVM.API.LLVMConstBitCast(lfn, LLVM.PointerType(LLVM.FunctionType(LLVM.API.LLVMGetCalledFunctionType(inst))))
-            end
-            LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst)-1, lfn)
         end
     end
 
@@ -130,10 +128,8 @@ function rename_ir!(job, inst::LLVM.CallInst)
                     lfn = LLVM.API.LLVMGetNamedFunction(mod, fn_str)
                     if lfn == C_NULL
                         lfn = LLVM.API.LLVMAddFunction(mod, fn, LLVM.API.LLVMGetCalledFunctionType(inst))
-                    else
-                        lfn = LLVM.API.LLVMConstBitCast(lfn, LLVM.PointerType(LLVM.FunctionType(LLVM.API.LLVMGetCalledFunctionType(inst))))
                     end
-                    LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst)-1, lfn)
+                    LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst) - 1, lfn)
                 end
             end
         end
