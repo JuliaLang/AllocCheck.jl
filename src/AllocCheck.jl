@@ -196,6 +196,17 @@ function rename_calls_and_throws!(f::LLVM.Function, job)
                     branch_index = ConstantInt(length(successors(catch_switch)))
                     LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
                 end
+            elseif isa(inst, LLVM.UnreachableInst)
+
+                # By assuming forward-progress, we know that any code post-dominated
+                # by an `unreachable` must either be dead or contain a statically-known
+                # throw().
+                #
+                # This can be useful in, e.g., cases where Julia codegen knows that a
+                # dynamic dispatch is must-throw but the LLVM IR does not otherwise
+                # reflect this information.
+                position!(builder, block)
+                brinst = br!(builder, any_throw)
             end
         end
     end
