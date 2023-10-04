@@ -18,7 +18,7 @@ const known_nonalloc_funcs = (
 function is_alloc_function(name)
     maybe_alloc = occursin(r"(ijl_|jl_).*", name)
     if maybe_alloc
-        any(x->contains(str, x), known_nonalloc_funcs) && return false
+        any(x->contains(name, x), known_nonalloc_funcs) && return false
         return true
     end
     return false
@@ -107,7 +107,7 @@ function rename_ir!(job, inst::LLVM.CallInst)
             LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst)-1, lfn)
         end
     end
-    
+
     if isa(dest, ConstantExpr)
         # Enzyme should be able to handle these
         # detect calls to literal pointers and replace with function name, if possible
