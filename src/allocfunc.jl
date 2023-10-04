@@ -12,7 +12,11 @@ const known_nonalloc_funcs = (
     "jl_box_bool", "ijl_box_bool",
     "jl_box_int8", "ijl_box_int8",
     "jl_box_uint8", "ijl_box_uint8",
-    r"(ijl|jl)_unbox.*"
+    r"(ijl|jl)_unbox.*",
+    "jl_excstack_state", "ijl_excstack_state",
+    "jl_restore_excstack", "ijl_restore_excstack",
+    "jl_enter_handler", "ijl_enter_handler",
+    "jl_pop_handler", "ijl_pop_handler",
 )
 
 function is_alloc_function(name)
