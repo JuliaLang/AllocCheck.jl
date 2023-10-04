@@ -137,10 +137,14 @@ function Base.show(io::IO, alloc::AllocInstance)
         Base.println(io, "Allocation of ", typ, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
 
         # Print code excerpt of allocation site
-        source = open(fixup_source_path(alloc.backtrace[1].file))
-        Base.print(io, "  | ")
-        Base.println(io, strip(readlines(source)[alloc.backtrace[1].line]))
-        close(source)
+        try
+            source = open(fixup_source_path(alloc.backtrace[1].file))
+            Base.print(io, "  | ")
+            Base.println(io, strip(readlines(source)[alloc.backtrace[1].line]))
+            close(source)
+        catch
+            Base.print(io, "  | (source not available)")
+        end
 
         # Print backtrace
         Base.show_backtrace(io, alloc.backtrace)
