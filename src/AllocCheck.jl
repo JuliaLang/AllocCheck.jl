@@ -145,10 +145,12 @@ function Base.show(io::IO, alloc::AllocInstance)
     typ = guess_julia_type(alloc.inst)
 
     if length(alloc.backtrace) == 0
-        Base.println(io, "Allocation of ", typ, " in ")
+        Base.printstyled(io, "Allocation", color=:red, bold=true)
+        Base.println(io, " of ", typ, " in ")
         Base.println(io, alloc.inst)
     else
-        Base.println(io, "Allocation of ", typ, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
+        Base.printstyled(io, "Allocation", color=:red, bold=true)
+        Base.println(io, " of ", typ, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
 
         # Print code excerpt of allocation site
         try
