@@ -19,11 +19,26 @@ const known_nonalloc_funcs = (
     "jl_pop_handler", "ijl_pop_handler",
 )
 
-function is_alloc_function(name)
+const known_alloc_with_throw_funcs = (
+    "jl_f_ifelse", "ijl_f_ifelse",
+    "jl_f_typeassert", "ijl_f_typeassert",
+    "jl_f_isa", "ijl_f_isa",
+    "jl_f_issubtype", "ijl_f_issubtype",
+    "jl_f_is", "ijl_f_is",
+    "jl_f_typeof", "ijl_f_typeof",
+    "jl_f_sizeof", "ijl_f_sizeof",
+    "jl_f_throw", "ijl_f_throw",
+)
+
+function is_alloc_function(name, ignore_throw)
     maybe_alloc = occursin(r"(ijl_|jl_).*", name)
     if maybe_alloc
-        any(x -> contains(name, x), known_nonalloc_funcs) && return false
-        return true
+        has_alloc = false
+        if ignore_throw
+            has_alloc = any(x -> contains(name, x), known_alloc_with_throw_funcs)
+        end
+        has_alloc |= !any(x -> contains(name, x), known_nonalloc_funcs)
+        return has_alloc
     end
     return false
 end
