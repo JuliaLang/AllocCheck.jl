@@ -26,4 +26,7 @@ end
 
     @test length(check_allocs(same_ccall, (), ignore_throw=false)) == 2
     @test length(check_allocs(same_ccall, (), ignore_throw=true)) == 2
+
+    @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = false)) == 3
+    @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = true)) == 0
 end

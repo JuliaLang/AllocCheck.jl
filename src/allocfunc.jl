@@ -28,17 +28,20 @@ const known_alloc_with_throw_funcs = (
     "jl_f_typeof", "ijl_f_typeof",
     "jl_f_sizeof", "ijl_f_sizeof",
     "jl_f_throw", "ijl_f_throw",
+    "jl_f__svec_ref", "ijl_f__svec_ref",
 )
 
 function is_alloc_function(name, ignore_throw)
     maybe_alloc = occursin(r"(ijl_|jl_).*", name)
     if maybe_alloc
-        has_alloc = false
-        if ignore_throw
-            has_alloc = any(x -> contains(name, x), known_alloc_with_throw_funcs)
+        is_throw_func = any(x -> contains(name, x), known_alloc_with_throw_funcs)
+        if is_throw_func && ignore_throw
+            return false
+        else
+            return true
         end
-        has_alloc |= !any(x -> contains(name, x), known_nonalloc_funcs)
-        return has_alloc
+        any(x -> contains(name, x), known_nonalloc_funcs) || return true
+        return false
     end
     return false
 end
