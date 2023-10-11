@@ -136,23 +136,27 @@ function optimize!(@nospecialize(job::CompilerJob), mod::LLVM.Module)
     end
 end
 
-struct AllocInstance
-    inst::LLVM.CallInst
+struct AllocationSite
+    type::Any
     backtrace::Vector{Base.StackTraces.StackFrame}
 end
 
-alloc_type(alloc::AllocInstance) = guess_julia_type(alloc.inst)
+function Base.:(==)(self::AllocationSite, other::AllocationSite)
+    return (self.type == other.type) && (self.backtrace == other.backtrace)
+end
 
-function Base.show(io::IO, alloc::AllocInstance)
-    typ = alloc_type(alloc)
+function Base.hash(alloc::AllocationSite, h::UInt)
+    return Base.hash(alloc.type, Base.hash(alloc.backtrace, h))
+end
 
+function Base.show(io::IO, alloc::AllocationSite)
     if length(alloc.backtrace) == 0
         Base.printstyled(io, "Allocation", color=:red, bold=true)
-        Base.println(io, " of ", typ, " in ")
-        Base.println(io, alloc.inst)
+        # TODO: Even when backtrace fails, we should report at least 1 stack frame
+        Base.println(io, " of ", alloc.type, " in unknown location")
     else
         Base.printstyled(io, "Allocation", color=:red, bold=true)
-        Base.println(io, " of ", typ, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
+        Base.println(io, " of ", alloc.type, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
 
         # Print code excerpt of allocation site
         try
@@ -246,7 +250,7 @@ end
     check_allocs(func, types; entry_abi=:specfunc, ret_mod=false)
 
 Compiles the given function and types to LLVM IR and checks for allocations.
-Returns a vector of `AllocInstance` structs, each containing a `CallInst` and a backtrace.
+Returns a vector of `AllocationSite` structs, each containing a `CallInst` and a backtrace.
 
 # Example
 ```jldoctest
@@ -257,7 +261,7 @@ julia> function foo(x::Int, y::Int)
 foo (generic function with 1 method)
 
 julia> allocs = check_allocs(foo, (Int, Int))
-AllocCheck.AllocInstance[]
+AllocCheck.AllocationSite[]
 ```
 
 """
@@ -266,7 +270,7 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
         throw(MethodError(func, types))
     end
     job = create_job(func, types; entry_abi)
-    allocs = AllocInstance[]
+    allocs = AllocationSite[]
     mod = JuliaContext() do ctx
         ir = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
         mod = ir[1]
@@ -295,7 +299,8 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
 
                         if is_alloc_function(name(decl), ignore_throw)
                             bt = backtrace_(inst; compiled)
-                            alloc = AllocInstance(inst, bt)
+                            typ = guess_julia_type(inst)
+                            alloc = AllocationSite(typ, bt)
                             push!(allocs, alloc)
                         end
 
@@ -312,6 +317,7 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
         mod
     end
 
+    unique!(allocs)
     ret_mod && return mod
     return allocs
 end
