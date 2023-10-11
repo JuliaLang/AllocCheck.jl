@@ -17,16 +17,13 @@ const known_nonalloc_funcs = (
     "jl_restore_excstack", "ijl_restore_excstack",
     "jl_enter_handler", "ijl_enter_handler",
     "jl_pop_handler", "ijl_pop_handler",
+    "jl_f_typeof", "ijl_f_typeof",
 )
 
 const known_alloc_with_throw_funcs = (
     "jl_f_ifelse", "ijl_f_ifelse",
     "jl_f_typeassert", "ijl_f_typeassert",
-    "jl_f_isa", "ijl_f_isa",
-    "jl_f_issubtype", "ijl_f_issubtype",
     "jl_f_is", "ijl_f_is",
-    "jl_f_typeof", "ijl_f_typeof",
-    "jl_f_sizeof", "ijl_f_sizeof",
     "jl_f_throw", "ijl_f_throw",
     "jl_f__svec_ref", "ijl_f__svec_ref",
 )
@@ -114,12 +111,12 @@ function rename_ir!(job, inst::LLVM.CallInst)
 
     if isa(dest, LLVM.LoadInst)
         fptr = LLVM.Value(LLVM.LLVM.API.LLVMGetOperand(dest, 0))
-        if occursin("bitcast", string(dest))
+        if fptr isa LLVM.ConstantExpr && opcode(fptr) == LLVM.API.LLVMBitCast
             fn_got = LLVM.Value(LLVM.LLVM.API.LLVMGetOperand(fptr, 0))
             fname = name(fn_got)
-            if startswith(fname, "jlplt_") && endswith(fname, "_got")
-                fname = fname[7:end]
-                fname = replace(fname, r"_\d+_got$" => "")
+            match_ = match(r"^jlplt_(.*)_\d+_got$", fname)
+            if match_ !== nothing
+                fname = match_[1]
                 mod = LLVM.parent(LLVM.parent(LLVM.parent(inst)))
                 lfn = LLVM.API.LLVMGetNamedFunction(mod, fname)
                 if lfn == C_NULL
