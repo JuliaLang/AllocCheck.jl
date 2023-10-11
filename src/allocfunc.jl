@@ -35,10 +35,12 @@ function is_alloc_function(name, ignore_throw)
     maybe_alloc = occursin(r"(ijl_|jl_).*", name)
     if maybe_alloc
         is_throw_func = any(x -> contains(name, x), known_alloc_with_throw_funcs)
-        if is_throw_func && ignore_throw
-            return false
-        else
-            return true
+        if is_throw_func
+            if ignore_throw
+                return false
+            else
+                return true
+            end
         end
         any(x -> contains(name, x), known_nonalloc_funcs) || return true
         return false
