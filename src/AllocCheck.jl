@@ -187,7 +187,7 @@ function rename_calls_and_throws!(f::LLVM.Function, job)
                 end
 
                 # `catch`: Add pseudo-edge from any_catch
-                if name(decl) == "__sigsetjmp"
+                if name(decl) == "__sigsetjmp" || name(decl) == "sigsetjmp"
                     icmp_ = user(only(uses(inst))) # Asserts one usage
                     @assert icmp_ isa LLVM.ICmpInst
                     br_ = user(only(uses(icmp_)))  # Asserts one usage
@@ -269,7 +269,7 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
                         catch_only = dominates(domtree, catch_, inst)
                         ignore_throw && catch_only && continue
 
-                        if is_alloc_function(name(decl))
+                        if is_alloc_function(name(decl), ignore_throw)
                             bt = backtrace_(inst; compiled)
                             alloc = AllocInstance(inst, bt)
                             push!(allocs, alloc)

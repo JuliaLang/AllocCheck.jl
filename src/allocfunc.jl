@@ -1,49 +1,48 @@
 # List of methods to location of arg which is the mi/function, then start of args
-const generic_method_offsets = Dict{String, Tuple{Int,Int}}(("jl_f__apply_latest" => (2,3), "ijl_f__apply_latest" => (2,3), "jl_f__call_latest" => (2,3), "ijl_f__call_latest" => (2,3), "jl_f_invoke" => (2,3), "jl_invoke" => (1,3), "jl_apply_generic" => (1,2), "ijl_f_invoke" => (2,3), "ijl_invoke" => (1,3), "ijl_apply_generic" => (1,2)))
+const generic_method_offsets = Dict{String,Tuple{Int,Int}}(("jl_f__apply_latest" => (2, 3), "ijl_f__apply_latest" => (2, 3), "jl_f__call_latest" => (2, 3), "ijl_f__call_latest" => (2, 3), "jl_f_invoke" => (2, 3), "jl_invoke" => (1, 3), "jl_apply_generic" => (1, 2), "ijl_f_invoke" => (2, 3), "ijl_invoke" => (1, 3), "ijl_apply_generic" => (1, 2)))
 
-const alloc_funcs = (
-        "ijl_f__apply_latest", "ijl_f__call_latest", "ijl_f_invoke", "ijl_invoke", "ijl_apply_generic",
-        "ijl_alloc_array_1d", "ijl_alloc_array_2d", "ijl_alloc_array_3d",
-        "ijl_new_array",
-        "ijl_array_copy",
-        "ijl_alloc_string",
-        "ijl_in_threaded_region", "ijl_enter_threaded_region", "ijl_exit_threaded_region", "ijl_set_task_tid", "ijl_new_task",
-        "ijl_array_grow_beg",
-        "ijl_array_grow_end",
-        "ijl_array_grow_at",
-        "ijl_array_del_beg",
-        "ijl_array_del_end",
-        "ijl_array_del_at",
-        "ijl_gc_add_finalizer_th",
-        "ijl_symbol_n", "ijl_",
-        "ijl_reshape_array", "ijl_reshape_array",
-        "ijl_matching_methods", "ijl_matching_methods",
-        "ijl_array_sizehint", "ijl_array_sizehint",
-        "ijl_get_keyword_sorter", "ijl_get_keyword_sorter",
-        "ijl_ptr_to_array",
-        "ijl_box_float32",
-        "ijl_box_float64",
-        "ijl_box_int16",
-        "ijl_box_int32",
-        "ijl_box_int64",
-        "ijl_box_int8",
-        "ijl_box_slotnumber",
-        "ijl_box_ssavalue",
-        "ijl_box_uint16",
-        "ijl_box_uint32",
-        "ijl_box_uint64",
-        "ijl_box_uint8",
-        "ijl_box_uint8pointer",
-        "ijl_box_voidpointer",
-        "ijl_ptr_to_array_1d",
-        "ijl_eqtable_get", "ijl_eqtable_get",
-        "ijl_get_nth_field_checked",
-        "ijl_gc_alloc_typed", "ijl_gc_pool_alloc", "ijl_gc_big_alloc",
-        "ijl_gc_pool_alloc_instrumented", "ijl_gc_big_alloc_instrumented"
-    )
 
-function is_alloc_function(name)
-    name in alloc_funcs
+const known_nonalloc_funcs = (
+    "jl_egal__unboxed", "ijl_egal__unboxed",
+    "jl_lock_value", "ijl_lock_value",
+    "jl_unlock_value", "ijl_unlock_value",
+    "jl_get_nth_field_noalloc", "ijl_get_nth_field_noalloc",
+    "jl_load_and_lookup", "ijl_load_and_lookup",
+    "jl_lazy_load_and_lookup", "ijl_lazy_load_and_lookup",
+    "jl_box_bool", "ijl_box_bool",
+    "jl_box_int8", "ijl_box_int8",
+    "jl_box_uint8", "ijl_box_uint8",
+    r"(ijl|jl)_unbox.*",
+    "jl_excstack_state", "ijl_excstack_state",
+    "jl_restore_excstack", "ijl_restore_excstack",
+    "jl_enter_handler", "ijl_enter_handler",
+    "jl_pop_handler", "ijl_pop_handler",
+    "jl_f_typeof", "ijl_f_typeof",
+)
+
+const known_alloc_with_throw_funcs = (
+    "jl_f_ifelse", "ijl_f_ifelse",
+    "jl_f_typeassert", "ijl_f_typeassert",
+    "jl_f_is", "ijl_f_is",
+    "jl_f_throw", "ijl_f_throw",
+    "jl_f__svec_ref", "ijl_f__svec_ref",
+)
+
+function is_alloc_function(name, ignore_throw)
+    maybe_alloc = occursin(r"(ijl_|jl_).*", name)
+    if maybe_alloc
+        is_throw_func = any(x -> contains(name, x), known_alloc_with_throw_funcs)
+        if is_throw_func
+            if ignore_throw
+                return false
+            else
+                return true
+            end
+        end
+        any(x -> contains(name, x), known_nonalloc_funcs) || return true
+        return false
+    end
+    return false
 end
 
 function guess_julia_type(val::LLVM.Value, typeof=true)
@@ -110,6 +109,24 @@ function rename_ir!(job, inst::LLVM.CallInst)
     method_table = Core.Compiler.method_table(interp)
     dest = called_operand(inst)
 
+    if isa(dest, LLVM.LoadInst)
+        fptr = LLVM.Value(LLVM.LLVM.API.LLVMGetOperand(dest, 0))
+        if fptr isa LLVM.ConstantExpr && opcode(fptr) == LLVM.API.LLVMBitCast
+            fn_got = LLVM.Value(LLVM.LLVM.API.LLVMGetOperand(fptr, 0))
+            fname = name(fn_got)
+            match_ = match(r"^jlplt_(.*)_\d+_got$", fname)
+            if match_ !== nothing
+                fname = match_[1]
+                mod = LLVM.parent(LLVM.parent(LLVM.parent(inst)))
+                lfn = LLVM.API.LLVMGetNamedFunction(mod, fname)
+                if lfn == C_NULL
+                    lfn = LLVM.API.LLVMAddFunction(mod, Symbol(fname), LLVM.API.LLVMGetCalledFunctionType(inst))
+                end
+                LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst) - 1, lfn)
+            end
+        end
+    end
+
     if isa(dest, ConstantExpr)
         # Enzyme should be able to handle these
         # detect calls to literal pointers and replace with function name, if possible
@@ -132,10 +149,8 @@ function rename_ir!(job, inst::LLVM.CallInst)
                     lfn = LLVM.API.LLVMGetNamedFunction(mod, fn_str)
                     if lfn == C_NULL
                         lfn = LLVM.API.LLVMAddFunction(mod, fn, LLVM.API.LLVMGetCalledFunctionType(inst))
-                    else
-                        lfn = LLVM.API.LLVMConstBitCast(lfn, LLVM.PointerType(LLVM.FunctionType(LLVM.API.LLVMGetCalledFunctionType(inst))))
                     end
-                    LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst)-1, lfn)
+                    LLVM.API.LLVMSetOperand(inst, LLVM.API.LLVMGetNumOperands(inst) - 1, lfn)
                 end
             end
         end
