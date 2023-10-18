@@ -29,4 +29,5 @@ end
 
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = false)) == 3
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = true)) == 0
+    @test length(check_allocs(time, ())) == 0
 end
