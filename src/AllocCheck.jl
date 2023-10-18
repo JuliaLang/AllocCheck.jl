@@ -222,7 +222,7 @@ function rename_calls_and_throws!(f::LLVM.Function, job)
 end
 
 """
-check_allocs(func, types; entry_abi=:specfunc, ret_mod=false)
+    check_allocs(func, types; entry_abi=:specfunc, ret_mod=false)
 
 Compiles the given function and types to LLVM IR and checks for allocations.
 Returns a vector of `AllocInstance` structs, each containing a `CallInst` and a backtrace.
