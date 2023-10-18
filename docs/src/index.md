@@ -37,10 +37,13 @@ Some functions that we do not expect may allocate memory, like `sin`, actually m
 ```@example README
 length(check_allocs(sin, (Float64,)))
 ```
-The reason for this is that `sin` may **throw an error**, and the exception object requires some allocations. We can ignore allocations that only happen when throwing errors by passing `ignore_throw=true`:
+The reason for this is that `sin` may **throw an error**, and the exception path requires some allocations. We can ignore allocations that only happen when throwing errors by passing `ignore_throw=true`:
 
 ```@example README
-length(check_allocs(sin, (Float64,); ignore_throw=true)) # ignore allocations that only happen when throwing errors
+allocs = check_allocs(sin, (Float64,); ignore_throw=true) # ignore allocations that only happen when throwing errors
+
+using Test
+@test isempty(allocs)
 ```
 
 ## Limitations
