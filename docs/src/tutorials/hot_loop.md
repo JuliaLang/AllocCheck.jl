@@ -14,9 +14,10 @@ function run_almost_forever()
 end
 
 # Silly implementations of the functions used in the example
-sample_measurement() = randn()
+sample_measurement() = 2.0
 controller(y) = -2y
 apply_control(u) = nothing
+nothing # hide
 ```
 
 Here, the primary concern is the loop, while the preamble of the function should be allowed to allocate memory. The recommended strategy in this case is to refactor the function into a separate preamble and loop, like this
@@ -30,12 +31,13 @@ end
 function run_almost_forever!(logvector) # The hot loop that is allocation free
     for i = eachindex(logvector) # Run a hot loop that may not allocate
         y = sample_measurement()
-        logvector[i] = y
+        @inbounds logvector[i] = y
         u = controller(y)
         apply_control(u)
         Libc.systemsleep(0.01)
     end
 end
+nothing # hide
 ```
 
 We may now analyze the loop function `run_almost_forever!` to verify that it does not allocate memory:
@@ -45,3 +47,33 @@ allocs = check_allocs(run_almost_forever!, (Vector{Float64},));
 @test isempty(allocs)
 ```
 
+
+## More complicated initialization
+In practice, a function may need to perform several distinct allocations upfront, including potentially allocating objects of potentially complicated types, like closures etc. In situations like this, the following pattern may be useful:
+```julia
+struct Workspace
+    ... # All you need to run the hot loop
+end
+
+function setup()
+    # Allocate and initialize the workspace
+    return workspace
+end
+
+function run!(workspace::Workspace)
+    ... # The hot loop
+end
+
+function run()
+    workspace = setup()
+    run!(workspace)
+end
+```
+
+Where `workspace` is either a custom struct designed to serve as a workspace for the hot loop, or simply a tuple of all the objects required.
+
+The benefit of breaking the function up into two parts which are called from a third, is that we may now create the workspace object individually, and use it to compute the type of the arguments to the `run!` function that we are interested in analyzing:
+```julia
+workspace = setup()
+allocs = check_allocs(run!, (typeof(workspace),))
+```

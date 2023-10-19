@@ -9,6 +9,7 @@ function myfun(verbose::Bool)
         verbose && @info "a = $a"
     end
 end
+nothing # hide
 ```
 Here, the printing of some relevant information is only performed if `verbose = true`. While the printing is optional, and not performed if `verbose = false`, [`check_allocs`](@ref) operates on _types rather than values_, i.e., `check_allocs` only knows that the argument is of type `Bool`, not that it may have the value `false`:
 ```@example DEBUGGING
