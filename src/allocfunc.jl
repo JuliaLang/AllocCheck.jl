@@ -19,6 +19,8 @@ const known_nonalloc_funcs = (
     "jl_pop_handler", "ijl_pop_handler",
     "jl_f_typeof", "ijl_f_typeof",
     "jl_clock_now", "ijl_clock_now",
+    "jl_throw", "ijl_throw", #= the allocation of the error is separate =#
+    "jl_gc_queue_root", "ijl_gc_queue_root",
 )
 
 const known_alloc_with_throw_funcs = (
@@ -73,9 +75,8 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
         end
         if isa(val, LLVM.CallInst) && typeof
             fn = LLVM.called_operand(val)
-            if isa(fn, LLVM.Function) && (LLVM.name(fn) in ("ijl_gc_pool_alloc_instrumented", "ijl_gc_big_alloc_instrumented", "ijl_gc_alloc_typed"))
+            if isa(fn, LLVM.Function) && (LLVM.name(fn) in ("ijl_gc_pool_alloc_instrumented", "ijl_gc_big_alloc_instrumented", "ijl_gc_alloc_typed", "jl_gc_pool_alloc_instrumented", "jl_gc_big_alloc_instrumented", "jl_gc_alloc_typed"))
                 res = guess_julia_type(operands(val)[end-1], false)
-
                 if res !== nothing
                     return res
                 end
@@ -87,10 +88,63 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
                     return res
                 end
             end
+
             if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_alloc_string", "jl_alloc_string"))
                 return String
             end
 
+            if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_copy_array", "jl_copy_array"))
+                return Array
+            end
+            if isa(fn, LLVM.Function) && occursin(r"(ijl_|jl_)box_(.*)", name(fn))
+                typestr = match(r"(ijl_|jl_)box_(.*)", name(fn)).captures[end]
+                typestr == "bool" && return Bool
+                typestr == "char" && return Char
+                typestr == "float32" && return Float32
+                typestr == "float64" && return Float64
+                typestr == "int16" && return Int16
+                typestr == "int32" && return Int32
+                typestr == "int64" && return Int64
+                typestr == "int8" && return Int8
+                typestr == "slotnumber" && return Core.SlotNumber
+                typestr == "ssavalue" && return Core.SSAValue
+                typestr == "uint16" && return UInt16
+                typestr == "uint32" && return UInt32
+                typestr == "uint64" && return UInt64
+                typestr == "uint8" && return UInt8
+                typestr == "uint8pointer" && return Ptr{UInt8}
+                typestr == "voidpointer" && return Ptr{Cvoid}
+                return Any
+            end
+
+            if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_gc_pool_alloc", "jl_gc_pool_alloc"))
+                for use in uses(val)
+                    istag = user(use)
+                    if isa(istag, LLVM.BitCastInst)
+                        for bituse in uses(istag)
+                            isgep = user(bituse)
+                            if isa(isgep, LLVM.GetElementPtrInst)
+                                istag = isgep
+                                @goto gep_handling
+                            end
+                        end
+                    elseif isa(istag, LLVM.GetElementPtrInst)
+                        @goto gep_handling
+                    else
+                        continue
+                    end
+                    @label gep_handling
+                    if convert(Int,operands(istag::LLVM.GetElementPtrInst)[2]) == -1
+                        for gepuse in uses(istag)
+                            isstore = user(gepuse)
+                            if isa(isstore, LLVM.StoreInst)
+                                return guess_julia_type(operands(isstore)[1], true)
+                            end
+                        end
+                    end
+                end
+                return guess_julia_type(operands(val)[1], false)
+            end
             break
         end
         break
