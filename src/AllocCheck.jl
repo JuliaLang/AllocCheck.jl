@@ -104,20 +104,34 @@ function backtrace_(inst::LLVM.Instruction, bt=StackTraces.StackFrame[]; compile
 
     return bt
 end
-
-function build_newpm_pipeline!(pb::PassBuilder, mpm::NewPMModulePassManager, speedup=2, size=0, lower_intrinsic=true,
-    dump_native=false, external_use=false, llvm_only=false,)
-    ccall(:jl_build_newpm_pipeline, Cvoid, (LLVM.API.LLVMModulePassManagerRef, LLVM.API.LLVMPassBuilderRef, Cint, Cint, Cint, Cint, Cint, Cint),
-        mpm, pb, speedup, size, lower_intrinsic, dump_native, external_use, llvm_only)
+if VERSION >= v"1.10-beta3"
+    function build_newpm_pipeline!(pb::PassBuilder, mpm::NewPMModulePassManager, speedup=2, size=0, lower_intrinsics=true,
+        dump_native=false, external_use=false, llvm_only=false,)
+        ccall(:jl_build_newpm_pipeline, Cvoid, (LLVM.API.LLVMModulePassManagerRef, LLVM.API.LLVMPassBuilderRef, Cint, Cint, Cint, Cint, Cint, Cint),
+            mpm, pb, speedup, size, lower_intrinsics, dump_native, external_use, llvm_only)
+    end
+else
+    function build_oldpm_pipeline!(pm::ModulePassManager, opt_level=2, lower_intrinsics=true)
+        ccall(:jl_add_optimization_passes, Cvoid,
+                    (LLVM.API.LLVMPassManagerRef, Cint, Cint),
+                    pm, opt_level, lower_intrinsics)
+    end
 end
 
 function optimize!(@nospecialize(job::CompilerJob), mod::LLVM.Module)
     triple = GPUCompiler.llvm_triple(job.config.target)
     tm = GPUCompiler.llvm_machine(job.config.target)
-    @dispose pb = LLVM.PassBuilder(tm) begin
-        @dispose mpm = LLVM.NewPMModulePassManager(pb) begin
-            build_newpm_pipeline!(pb, mpm)
-            run!(mpm, mod, tm)
+    if VERSION >= v"1.10-beta3"
+        @dispose pb = LLVM.PassBuilder(tm) begin
+            @dispose mpm = LLVM.NewPMModulePassManager(pb) begin
+                build_newpm_pipeline!(pb, mpm)
+                run!(mpm, mod, tm)
+            end
+        end
+    else
+        @dispose pm=ModulePassManager() begin
+            build_oldpm_pipeline!(pm)
+            run!(pm, mod)
         end
     end
 end
