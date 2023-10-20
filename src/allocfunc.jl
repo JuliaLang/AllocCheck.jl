@@ -18,6 +18,7 @@ const known_nonalloc_funcs = (
     "jl_enter_handler", "ijl_enter_handler",
     "jl_pop_handler", "ijl_pop_handler",
     "jl_f_typeof", "ijl_f_typeof",
+    "jl_clock_now", "ijl_clock_now",
 )
 
 const known_alloc_with_throw_funcs = (
