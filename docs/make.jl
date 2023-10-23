@@ -14,4 +14,5 @@ makedocs(
 
 deploydocs(
       repo = "github.com/JuliaComputing/AllocCheck.jl.git",
+      push_preview = true,
 )
