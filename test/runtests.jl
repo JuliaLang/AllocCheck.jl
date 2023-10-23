@@ -3,6 +3,7 @@ using Test
 
 function alloc_in_catch()
    try
+       Base.inferencebarrier(nothing) # Prevent catch from being elided
    catch
        return Any[] # in catch block: filtered by `ignore_throw=true`
    end
