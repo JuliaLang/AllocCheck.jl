@@ -204,15 +204,18 @@ function rename_calls_and_throws!(f::LLVM.Function, job)
                 if name(decl) == "__sigsetjmp" || name(decl) == "sigsetjmp"
                     icmp_ = user(only(uses(inst))) # Asserts one usage
                     @assert icmp_ isa LLVM.ICmpInst
-                    br_ = user(only(uses(icmp_)))  # Asserts one usage
-                    @assert br_ isa LLVM.BrInst
+                    @assert convert(Int, operands(icmp_)[2]) == 0
+                    for br_ in uses(icmp_)
+                        br_ = user(br_)
+                        @assert br_ isa LLVM.BrInst
 
-                    # Rewrite the jump to this `catch` block as an indirect jump
-                    # from a common `any_catch` block
-                    _, catch_target = successors(br_)
-                    successors(br_)[2] = any_catch
-                    branch_index = ConstantInt(length(successors(catch_switch)))
-                    LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
+                        # Rewrite the jump to this `catch` block as an indirect jump
+                        # from a common `any_catch` block
+                        _, catch_target = successors(br_)
+                        successors(br_)[2] = any_catch
+                        branch_index = ConstantInt(length(successors(catch_switch)))
+                        LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
+                    end
                 end
             elseif isa(inst, LLVM.UnreachableInst)
 
