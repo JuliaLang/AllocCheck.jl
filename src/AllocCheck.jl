@@ -254,7 +254,7 @@ AllocCheck.AllocInstance[]
 ```
 
 """
-function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false, ignore_throw=false)
+function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false, ignore_throw=true)
     job = create_job(func, types; entry_abi)
     allocs = AllocInstance[]
     mod = JuliaContext() do ctx
