@@ -125,21 +125,25 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
                             isgep = user(bituse)
                             if isa(isgep, LLVM.GetElementPtrInst)
                                 istag = isgep
-                                @goto gep_handling
+                                offset = operands(istag::LLVM.GetElementPtrInst)[2]
+                                if isa(offset, LLVM.ConstantInt) && convert(Int,offset) == -1
+                                    @goto gep_handling
+                                end
                             end
                         end
                     elseif isa(istag, LLVM.GetElementPtrInst)
-                        @goto gep_handling
+                        offset = operands(istag::LLVM.GetElementPtrInst)[2]
+                        if isa(offset, LLVM.ConstantInt) && convert(Int,offset) == -1
+                            @goto gep_handling
+                        end
                     else
                         continue
                     end
                     @label gep_handling
-                    if convert(Int,operands(istag::LLVM.GetElementPtrInst)[2]) == -1
-                        for gepuse in uses(istag)
-                            isstore = user(gepuse)
-                            if isa(isstore, LLVM.StoreInst)
-                                return guess_julia_type(operands(isstore)[1], true)
-                            end
+                    for gepuse in uses(istag)
+                        isstore = user(gepuse)
+                        if isa(isstore, LLVM.StoreInst)
+                            return guess_julia_type(operands(isstore)[1], false)
                         end
                     end
                 end
