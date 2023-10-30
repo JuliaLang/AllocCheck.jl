@@ -16,6 +16,10 @@ function same_ccall()
     a,b
 end
 
+function throw_eof()
+    throw(EOFError())
+end
+
 @testset "AllocCheck.jl" begin
     @test length(check_allocs(mod, (Float64,Float64))) == 0
     @test length(check_allocs(sin, (Float64,); ignore_throw=false)) > 0
@@ -31,4 +35,5 @@ end
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = false)) == 3
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = true)) == 0
     @test length(check_allocs(time, ())) == 0
+    @test length(check_allocs(throw_eof, ())) == 0
 end
