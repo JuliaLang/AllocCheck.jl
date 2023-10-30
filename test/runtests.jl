@@ -17,18 +17,18 @@ function same_ccall()
 end
 
 @testset "AllocCheck.jl" begin
-    @test length(check_allocs(mod, (Float64,Float64))) == 0
+    @test length(check_allocs(mod, (Float64,Float64); ignore_throw=false)) == 0
     @test length(check_allocs(sin, (Float64,); ignore_throw=false)) > 0
     @test length(check_allocs(sin, (Float64,); ignore_throw=true)) == 0
-    @test length(check_allocs(*, (Matrix{Float64},Matrix{Float64}))) != 0
+    @test length(check_allocs(*, (Matrix{Float64},Matrix{Float64}); ignore_throw=true)) != 0
 
     @test length(check_allocs(alloc_in_catch, (); ignore_throw=false)) == 2
     @test length(check_allocs(alloc_in_catch, (); ignore_throw=true)) == 1
 
-    @test length(check_allocs(same_ccall, (), ignore_throw=false)) == 2
-    @test length(check_allocs(same_ccall, (), ignore_throw=true)) == 2
+    @test length(check_allocs(same_ccall, (); ignore_throw=false)) == 2
+    @test length(check_allocs(same_ccall, (); ignore_throw=true)) == 2
 
-    @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = false)) == 3
-    @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = true)) == 0
-    @test length(check_allocs(time, ())) == 0
+    @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw=false)) == 3
+    @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw=true)) == 0
+    @test length(check_allocs(time, (); ignore_throw=false)) == 0
 end
