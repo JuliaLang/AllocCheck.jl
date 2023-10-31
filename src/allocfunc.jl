@@ -93,7 +93,7 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
                 return String
             end
 
-            if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_copy_array", "jl_copy_array"))
+            if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_array_copy", "jl_array_copy"))
                 return Array
             end
             if isa(fn, LLVM.Function) && occursin(r"(ijl_|jl_)box_(.*)", name(fn))
@@ -143,7 +143,9 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
                     for gepuse in uses(istag)
                         isstore = user(gepuse)
                         if isa(isstore, LLVM.StoreInst)
-                            return guess_julia_type(operands(isstore)[1], false)
+                            type_tag = operands(isstore)[1]
+                            @assert type_tag isa LLVM.ConstantInt
+                            return guess_julia_type(type_tag, false)
                         end
                     end
                 end
