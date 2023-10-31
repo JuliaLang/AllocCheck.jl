@@ -48,6 +48,18 @@ function is_alloc_function(name, ignore_throw)
     return false
 end
 
+function typeof_typetag_gep(inst::LLVM.GetElementPtrInst)
+    for gepuse in uses(inst)
+        isstore = user(gepuse)
+        if isa(isstore, LLVM.StoreInst)
+            type_tag = operands(isstore)[1]
+            @assert type_tag isa LLVM.ConstantInt
+            return guess_julia_type(type_tag, false)
+        end
+    end
+    return nothing # Continue looking
+end
+
 function guess_julia_type(val::LLVM.Value, typeof=true)
     while true
         if isa(val, LLVM.ConstantExpr)
@@ -127,26 +139,19 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
                                 istag = isgep
                                 offset = operands(istag::LLVM.GetElementPtrInst)[2]
                                 if isa(offset, LLVM.ConstantInt) && convert(Int,offset) == -1
-                                    @goto gep_handling
+                                    typ = typeof_typetag_gep(istag)
+                                    !isnothing(typ) && return typ
                                 end
                             end
                         end
                     elseif isa(istag, LLVM.GetElementPtrInst)
                         offset = operands(istag::LLVM.GetElementPtrInst)[2]
                         if isa(offset, LLVM.ConstantInt) && convert(Int,offset) == -1
-                            @goto gep_handling
+                            typ = typeof_typetag_gep(istag)
+                            !isnothing(typ) && return typ
                         end
                     else
                         continue
-                    end
-                    @label gep_handling
-                    for gepuse in uses(istag)
-                        isstore = user(gepuse)
-                        if isa(isstore, LLVM.StoreInst)
-                            type_tag = operands(isstore)[1]
-                            @assert type_tag isa LLVM.ConstantInt
-                            return guess_julia_type(type_tag, false)
-                        end
                     end
                 end
                 return guess_julia_type(operands(val)[1], false)
