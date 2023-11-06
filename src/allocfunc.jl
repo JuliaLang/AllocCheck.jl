@@ -21,6 +21,12 @@ const known_nonalloc_funcs = (
     "jl_clock_now", "ijl_clock_now",
     "jl_throw", "ijl_throw", #= the allocation of the error is separate =#
     "jl_gc_queue_root", "ijl_gc_queue_root",
+    "jl_gc_enable", "ijl_gc_enable",
+    "jl_gc_disable_finalizers_internal", "ijl_gc_disable_finalizers_internal",
+    "jl_gc_is_in_finalizer", "ijl_gc_is_in_finalizer",
+    "jl_enable_gc_logging", "ijl_enable_gc_logging",
+    "jl_gc_safepoint", "ijl_gc_safepoint",
+    "jl_gc_collect", "ijl_gc_collect", #= GC collection is not _technically_ an allocation =#
 )
 
 const known_alloc_with_throw_funcs = (
@@ -29,6 +35,7 @@ const known_alloc_with_throw_funcs = (
     "jl_f_is", "ijl_f_is",
     "jl_f_throw", "ijl_f_throw",
     "jl_f__svec_ref", "ijl_f__svec_ref",
+    "jl_gc_enable_finalizers_internal", "ijl_gc_enable_finalizers_internal",
 )
 
 function is_alloc_function(name, ignore_throw)

@@ -20,6 +20,15 @@ function throw_eof()
     throw(EOFError())
 end
 
+function toggle_gc()
+    GC.enable(false)
+    GC.enable(true)
+end
+
+function run_gc_explicitly()
+    GC.gc()
+end
+
 @testset "AllocCheck.jl" begin
     @test length(check_allocs(mod, (Float64,Float64); ignore_throw=false)) == 0
     @test length(check_allocs(sin, (Float64,); ignore_throw=false)) > 0
@@ -34,6 +43,9 @@ end
 
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = false)) > 0
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = true)) == 0
+
     @test length(check_allocs(time, (); ignore_throw = false)) == 0
     @test length(check_allocs(throw_eof, (); ignore_throw = false)) == 0
+    @test length(check_allocs(toggle_gc, (); ignore_throw = false)) == 0
+    @test length(check_allocs(run_gc_explicitly, (); ignore_throw = false)) == 0
 end
