@@ -34,6 +34,6 @@ end
 
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = false)) > 0
     @test length(check_allocs(first, (Core.SimpleVector,); ignore_throw = true)) == 0
-    @test length(check_allocs(time, ())) == 0
-    @test length(check_allocs(throw_eof, ())) == 0
+    @test length(check_allocs(time, (); ignore_throw = false)) == 0
+    @test length(check_allocs(throw_eof, (); ignore_throw = false)) == 0
 end
