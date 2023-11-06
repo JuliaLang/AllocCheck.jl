@@ -154,7 +154,6 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
                         continue
                     end
                 end
-                return guess_julia_type(operands(val)[1], false)
             end
             break
         end
