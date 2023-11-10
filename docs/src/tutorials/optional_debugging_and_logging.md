@@ -18,7 +18,7 @@ check_allocs(myfun, (Bool,)) |> length
 ```
 Indeed, this function was determined to potentially allocate memory.
 
-To allow such optional features while still being able to prove that a function does not allocate if the allocating features are turned off, we may lift the _value_ `true` into the _type domain_, we do this by means of the `Val` type:
+To allow such optional features while still being able to prove that a function does not allocate if the allocating features are turned off, we may [lift the _value_ `true` into the _type domain_](https://docs.julialang.org/en/v1/manual/types/#%22Value-types%22), we do this by means of the `Val` type:
 ```@example DEBUGGING
 function typed_myfun(::Val{verbose}) where verbose
     a = 0.0
