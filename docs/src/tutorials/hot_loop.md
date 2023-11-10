@@ -52,16 +52,24 @@ allocs = check_allocs(run_almost_forever!, (Vector{Float64},));
 In practice, a function may need to perform several distinct allocations upfront, including potentially allocating objects of potentially complicated types, like closures etc. In situations like this, the following pattern may be useful:
 ```julia
 struct Workspace
-    ... # All you need to run the hot loop
+    # All you need to run the hot loop, for example:
+    cache1::Vector{Float64}
+    cache2::Matrix{Float64}
 end
 
-function setup()
+function setup(max_iterations::Int = 100_000)
     # Allocate and initialize the workspace
-    return workspace
+    cache1 = zeros(max_iterations)
+    cache2 = zeros(max_iterations, max_iterations)
+    return Workspace(cache1, cache2)
 end
 
 function run!(workspace::Workspace)
-    ... # The hot loop
+    # The hot loop
+    for i = eachindex(workspace.cache1)
+        workspace.cache1[i] = my_important_calculation() # The allocated cache is modified in place
+        ...
+    end
 end
 
 function run()
@@ -70,7 +78,7 @@ function run()
 end
 ```
 
-Where `workspace` is either a custom struct designed to serve as a workspace for the hot loop, or simply a tuple of all the objects required.
+Here, `workspace` is a custom struct designed to serve as a workspace for the hot loop, but it could also be realized as a simple tuple of all the allocated objects required for the computations. Note, the struct `Workspace` in this example was not marked as mutable. However, its contents, the two cache arrays, are. This means that the `run!` function may modify the contents of the cache arrays.
 
 The benefit of breaking the function up into two parts which are called from a third, is that we may now create the workspace object individually, and use it to compute the type of the arguments to the `run!` function that we are interested in analyzing:
 ```julia
