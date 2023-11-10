@@ -32,12 +32,7 @@ using AllocCheck, Test
 allocs = check_allocs(treading_lightly, (); ignore_throw=true) # Check that it's safe to proceed
 ```
 
-[`check_allocs`](@ref) returned a single allocation instance, associated with turning the GC back on. This is not a problem here since when this would hypothetically occur, we have already executed the hot loop and recovered from the error. To make sure that this is indeed the allocation we are seeing, we need to verify the identity of the allocation before proceeding. We may do this by verifying that the allocation comes from the `enable` function:
-```@example ERROR
-@test only(allocs).backtrace[1].func === :enable
-```
-
-The compiler may in the future become smarter and elide any allocation we are seeing, so this test may fail in the future. However, having checked that the only allocations that occur are acceptable to us, it's now safe to proceed:
+[`check_allocs`](@ref) returned zero allocations.
 
 ```@example ERROR
 val = treading_lightly()
