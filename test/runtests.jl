@@ -48,4 +48,6 @@ end
     @test length(check_allocs(throw_eof, (); ignore_throw = false)) == 0
     @test length(check_allocs(toggle_gc, (); ignore_throw = false)) == 0
     @test length(check_allocs(run_gc_explicitly, (); ignore_throw = false)) == 0
+
+    @test_throws MethodError check_allocs(sin, (String,); ignore_throw=false)
 end

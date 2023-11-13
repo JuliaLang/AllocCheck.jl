@@ -260,6 +260,9 @@ AllocCheck.AllocInstance[]
 
 """
 function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false, ignore_throw=true)
+    if !hasmethod(func, types)
+        throw(MethodError(func, types))
+    end
     job = create_job(func, types; entry_abi)
     allocs = AllocInstance[]
     mod = JuliaContext() do ctx
