@@ -29,7 +29,7 @@ function run_gc_explicitly()
     GC.gc()
 end
 
-@testset "AllocCheck.jl" begin
+@testset "Number of Allocations" begin
     @test length(check_allocs(mod, (Float64,Float64); ignore_throw=false)) == 0
     @test length(check_allocs(sin, (Float64,); ignore_throw=false)) > 0
     @test length(check_allocs(sin, (Float64,); ignore_throw=true)) == 0
@@ -48,4 +48,14 @@ end
     @test length(check_allocs(throw_eof, (); ignore_throw = false)) == 0
     @test length(check_allocs(toggle_gc, (); ignore_throw = false)) == 0
     @test length(check_allocs(run_gc_explicitly, (); ignore_throw = false)) == 0
+end
+
+if VERSION > v"1.11.0-DEV.753"
+memory_alloc() = Memory{Int}(undef, 10)
+end
+
+@testset "Types of Allocations" begin
+    if VERSION > v"1.11.0-DEV.753"
+    @test alloc_type(check_allocs(memory_alloc, (); ignore_throw = false)[1]) == Memory{Int}
+    end
 end
