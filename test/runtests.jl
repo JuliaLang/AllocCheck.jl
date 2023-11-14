@@ -62,6 +62,108 @@ end
     @test_throws MethodError check_allocs(sin, (String,); ignore_throw=false)
 end
 
+@testset "@check_allocs macro (syntax)" begin
+
+    struct Bar
+        val::Float64
+    end
+
+    # Standard function syntax
+    @check_allocs function my_mod0()
+        return 1.5
+    end
+    @check_allocs function my_mod1(x, y)
+        return mod(x, y)
+    end
+    @check_allocs function my_mod2(x::Float64, y)
+        return mod(x, y)
+    end
+    @check_allocs function my_mod3(::Float64, y)
+        return y * y
+    end
+    @check_allocs function my_mod4(::Float64, y::Float64)
+        return y * y
+    end
+    @check_allocs function (x::Bar)(y::Float64)
+        return mod(x.val, y)
+    end
+
+    x,y = Base.rand(2)
+    @test my_mod0() == 1.5
+    @test my_mod1(x, y) == mod(x, y)
+    @test my_mod2(x, y) == mod(x, y)
+    @test my_mod3(x, y) == y * y
+    @test my_mod4(x, y) == y * y
+    @test Bar(x)(y) == mod(x, y)
+
+    # Standard function syntax (w/ kwargs)
+    @check_allocs function my_mod5(; offset=1.0)
+        return 2 * offset
+    end
+    @check_allocs function my_mod6(x, y; offset=1.0)
+        return mod(x, y) + offset
+    end
+    @check_allocs function my_mod7(x::Float64, y; offset)
+        return mod(x, y) + offset
+    end
+    @check_allocs function (x::Bar)(y::Float64; a, b)
+        return mod(x.val, y) + a + b
+    end
+    @check_allocs function (x::Bar)(y::Float32; a, b=1.0)
+        return mod(x.val, y) + a + b
+    end
+
+    offset = Base.rand()
+    a,b = Base.rand(2)
+    @test my_mod5(; offset) == 2 * offset
+    @test my_mod5() == 2.0
+    @test my_mod6(x, y; offset) == mod(x, y) + offset
+    @test my_mod6(x, y) == mod(x, y) + 1.0
+    @test my_mod7(x, y; offset) == mod(x, y) + offset
+    @test Bar(x)(y; a, b) == mod(x, y) + a + b
+    @test Bar(x)(y; b, a) == mod(x, y) + a + b
+    @test Bar(x)(Float32(y); b, a) == mod(x, Float32(y)) + a + b
+    @test Bar(x)(Float32(y); a) == mod(x, Float32(y)) + a + 1.0
+
+    # (x,y) -> x*y
+    f0 = @check_allocs () -> 1.5
+    @test f0() == 1.5
+    f1 = @check_allocs (x,y) -> x * y
+    @test f1(x, y) == x * y
+    f2 = @check_allocs (x::Int,y::Float64) -> x * y
+    @test f2(3, y) == 3 * y
+    f3 = @check_allocs (::Int,y::Float64) -> y * y
+    @test f3(1, y) == y * y
+
+    # foo(x) = x^2
+    @check_allocs mysum0() = 1.5
+    @test mysum0() == 1.5
+    @check_allocs mysum1(x, y) = x + y
+    @test mysum1(x, y) == x + y
+    @check_allocs mysum2(x::Float64, y::Float64) = x + y
+    @test mysum2(x, y) == x + y
+    @check_allocs (x::Bar)(y::Bar) = x.val + y.val
+    @test Bar(x)(Bar(y)) == x + y
+end
+
+
+@testset "@check_allocs macro (behavior)" begin
+
+    # The check should raise errors only for problematic argument types
+    @check_allocs mymul(x,y) = x * y
+    @test mymul(1.5, 2.5) == 1.5 * 2.5
+    @test_throws AllocCheckFailure mymul(rand(10,10), rand(10,10))
+
+    # If provided, ignore_throw=false should include allocations that
+    # happen only on error paths
+    @check_allocs ignore_throw=false alloc_on_throw1(cond) =
+        (cond && (error("This exception allocates");); return 1.5)
+    @test_throws AllocCheckFailure alloc_on_throw1(false)
+    @check_allocs ignore_throw=true alloc_on_throw2(cond) =
+        (cond && (error("This exception allocates");); return 1.5)
+    @test alloc_on_throw2(false) === 1.5
+end
+
 if VERSION > v"1.11.0-DEV.753"
 memory_alloc() = Memory{Int}(undef, 10)
 end

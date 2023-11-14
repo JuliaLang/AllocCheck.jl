@@ -1,38 +1,18 @@
 module AllocCheck
 
-using GPUCompiler
-using GPUCompiler: safe_name
-using LLVM
-# Write your package code here.
+import LLVM, GPUCompiler
+using GPUCompiler: JuliaContext, safe_name
+using LLVM: BasicBlock, ConstantExpr, ConstantInt, IRBuilder, UndefValue, blocks, br!,
+            called_operand, dispose, dominates, instructions, metadata, name, opcode,
+            operands, position!, ret!, successors, switch!, uses, user
 
 include("allocfunc.jl")
 include("utils.jl")
+include("compiler.jl")
+include("macro.jl")
+include("abi_call.jl")
 
 module Runtime end
-
-struct NativeParams <: GPUCompiler.AbstractCompilerParams end
-
-DefaultCompilerTarget(; kwargs...) = GPUCompiler.NativeCompilerTarget(; jlruntime=true, kwargs...)
-
-const NativeCompilerJob = CompilerJob{NativeCompilerTarget,NativeParams}
-GPUCompiler.can_safepoint(@nospecialize(job::NativeCompilerJob)) = true
-GPUCompiler.runtime_module(::NativeCompilerJob) = Runtime
-runtime_slug(job::NativeCompilerJob) = "native_$(job.config.target.cpu)-$(hash(job.config.target.features))$(job.config.target.jlruntime ? "-jlrt" : "")"
-uses_julia_runtime(job::NativeCompilerJob) = job.config.target.jlruntime
-
-function create_job(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc)
-    source = methodinstance(Base._stable_typeof(func), Base.to_tuple_type(types))
-    target = DefaultCompilerTarget()
-    config = CompilerConfig(target, NativeParams(); kernel=false, entry_abi, always_inline=false)
-    CompilerJob(source, config)
-end
-
-
-function is_runtime_function(name)
-    rx = r"ijl(.)"
-    occursin(rx, name) && return true
-    return false
-end
 
 # generate a pseudo-backtrace from LLVM IR instruction debug information
 #
@@ -103,37 +83,6 @@ function backtrace_(inst::LLVM.Instruction, bt=StackTraces.StackFrame[]; compile
     end
 
     return bt
-end
-if VERSION >= v"1.10-beta3"
-    function build_newpm_pipeline!(pb::PassBuilder, mpm::NewPMModulePassManager, speedup=2, size=0, lower_intrinsics=true,
-        dump_native=false, external_use=false, llvm_only=false,)
-        ccall(:jl_build_newpm_pipeline, Cvoid, (LLVM.API.LLVMModulePassManagerRef, LLVM.API.LLVMPassBuilderRef, Cint, Cint, Cint, Cint, Cint, Cint),
-            mpm, pb, speedup, size, lower_intrinsics, dump_native, external_use, llvm_only)
-    end
-else
-    function build_oldpm_pipeline!(pm::ModulePassManager, opt_level=2, lower_intrinsics=true)
-        ccall(:jl_add_optimization_passes, Cvoid,
-                    (LLVM.API.LLVMPassManagerRef, Cint, Cint),
-                    pm, opt_level, lower_intrinsics)
-    end
-end
-
-function optimize!(@nospecialize(job::CompilerJob), mod::LLVM.Module)
-    triple = GPUCompiler.llvm_triple(job.config.target)
-    tm = GPUCompiler.llvm_machine(job.config.target)
-    if VERSION >= v"1.10-beta3"
-        @dispose pb = LLVM.PassBuilder(tm) begin
-            @dispose mpm = LLVM.NewPMModulePassManager(pb) begin
-                build_newpm_pipeline!(pb, mpm)
-                run!(mpm, mod, tm)
-            end
-        end
-    else
-        @dispose pm=ModulePassManager() begin
-            build_oldpm_pipeline!(pm)
-            run!(pm, mod)
-        end
-    end
 end
 
 struct AllocationSite
@@ -214,7 +163,16 @@ function Base.show(io::IO, alloc::AllocationSite)
     end
 end
 
-function rename_calls_and_throws!(f::LLVM.Function, job)
+struct AllocCheckFailure
+    allocs::Vector
+end
+
+function Base.show(io::IO, failure::AllocCheckFailure)
+    Base.println(io, "@check_alloc function contains ", length(failure.allocs), " allocations.")
+end
+
+
+function rename_calls_and_throws!(f::LLVM.Function)
 
     # In order to detect whether an instruction executes only when
     # throwing an error, we re-write all throw/catches to pass through
@@ -239,7 +197,7 @@ function rename_calls_and_throws!(f::LLVM.Function, job)
     for block in blocks(f)
         for inst in instructions(block)
             if isa(inst, LLVM.CallInst)
-                rename_ir!(job, inst)
+                rename_ir!(inst)
                 decl = called_operand(inst)
 
                 # `throw`: Add pseudo-edge to any_throw
@@ -287,6 +245,56 @@ function rename_calls_and_throws!(f::LLVM.Function, job)
 end
 
 """
+Find all static allocation sites in the provided LLVM IR.
+
+This function modifies the LLVM module in-place, effectively trashing it.
+"""
+function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
+    (; entry, compiled) = meta
+
+    allocs = AllocationSite[]
+    worklist = LLVM.Function[ entry ]
+    seen = LLVM.Function[ entry ]
+    while !isempty(worklist)
+        f = pop!(worklist)
+
+        throw_, catch_ = rename_calls_and_throws!(f)
+        domtree = LLVM.DomTree(f)
+        postdomtree = LLVM.PostDomTree(f)
+        for block in blocks(f)
+            for inst in instructions(block)
+                if isa(inst, LLVM.CallInst)
+                    decl = called_operand(inst)
+
+                    throw_only = dominates(postdomtree, throw_, inst)
+                    ignore_throw && throw_only && continue
+
+                    catch_only = dominates(domtree, catch_, inst)
+                    ignore_throw && catch_only && continue
+
+                    if is_alloc_function(name(decl), ignore_throw)
+                        bt = backtrace_(inst; compiled)
+                        typ = guess_julia_type(inst)
+                        alloc = AllocationSite(typ, bt)
+                        push!(allocs, alloc)
+                    end
+
+                    if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
+                        push!(worklist, decl)
+                        push!(seen, decl)
+                    end
+                end
+            end
+        end
+        dispose(postdomtree)
+        dispose(domtree)
+    end
+    # TODO: dispose(mod)
+    # dispose(mod)
+    return allocs
+end
+
+"""
     check_allocs(func, types; entry_abi=:specfunc, ret_mod=false)
 
 Compiles the given function and types to LLVM IR and checks for allocations.
@@ -305,64 +313,28 @@ AllocCheck.AllocationSite[]
 ```
 
 """
-function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:specfunc, ret_mod=false, ignore_throw=true)
+function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=true)
     if !hasmethod(func, types)
         throw(MethodError(func, types))
     end
-    job = create_job(func, types; entry_abi)
-    allocs = AllocationSite[]
-    mod = JuliaContext() do ctx
-        ir = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
-        mod = ir[1]
+    source = GPUCompiler.methodinstance(Base._stable_typeof(func), Base.to_tuple_type(types))
+    target = DefaultCompilerTarget()
+    job = CompilerJob(source, config)
+    allocs = JuliaContext() do ctx
+        mod, meta = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
         optimize!(job, mod)
+
+        allocs = find_allocs!(mod, meta; ignore_throw)
         # display(mod)
-        (; entry, compiled) = ir[2]
-
-        worklist = LLVM.Function[ entry ]
-        seen = LLVM.Function[ entry ]
-        while !isempty(worklist)
-            f = pop!(worklist)
-
-            throw_, catch_ = rename_calls_and_throws!(f, job)
-            domtree = LLVM.DomTree(f)
-            postdomtree = LLVM.PostDomTree(f)
-            for block in blocks(f)
-                for inst in instructions(block)
-                    if isa(inst, LLVM.CallInst)
-                        decl = called_operand(inst)
-
-                        throw_only = dominates(postdomtree, throw_, inst)
-                        ignore_throw && throw_only && continue
-
-                        catch_only = dominates(domtree, catch_, inst)
-                        ignore_throw && catch_only && continue
-
-                        if is_alloc_function(name(decl), ignore_throw)
-                            bt = backtrace_(inst; compiled)
-                            typ = guess_julia_type(inst)
-                            alloc = AllocationSite(typ, bt)
-                            push!(allocs, alloc)
-                        end
-
-                        if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
-                            push!(worklist, decl)
-                            push!(seen, decl)
-                        end
-                    end
-                end
-            end
-            dispose(postdomtree)
-            dispose(domtree)
-        end
-        mod
+        # dispose(mod)
+        allocs
     end
 
     unique!(allocs)
-    ret_mod && return mod
     return allocs
 end
 
 
-export check_allocs, alloc_type
+export check_allocs, alloc_type, @check_allocs, AllocCheckFailure
 
 end

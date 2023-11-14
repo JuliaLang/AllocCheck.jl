@@ -187,10 +187,7 @@ end
 
 import GPUCompiler: DYNAMIC_CALL, DELAYED_BINDING, RUNTIME_FUNCTION, UNKNOWN_FUNCTION, POINTER_FUNCTION
 import GPUCompiler: backtrace, isintrinsic
-function rename_ir!(job, inst::LLVM.CallInst)
-    world = job.world
-    interp = GPUCompiler.get_interpreter(job)
-    method_table = Core.Compiler.method_table(interp)
+function rename_ir!(inst::LLVM.CallInst)
     dest = called_operand(inst)
 
     if isa(dest, LLVM.LoadInst)
@@ -217,7 +214,7 @@ function rename_ir!(job, inst::LLVM.CallInst)
         if occursin("inttoptr", string(dest))
             # extract the literal pointer
             ptr_arg = first(operands(dest))
-            GPUCompiler.@compiler_assert isa(ptr_arg, ConstantInt) job
+            # GPUCompiler.@compiler_assert isa(ptr_arg, ConstantInt) job
             ptr_val = convert(Int, ptr_arg)
             ptr = Ptr{Cvoid}(ptr_val)
 
