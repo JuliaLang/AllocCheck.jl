@@ -141,8 +141,10 @@ struct AllocInstance
     backtrace::Vector{Base.StackTraces.StackFrame}
 end
 
+alloc_type(alloc::AllocInstance) = guess_julia_type(alloc.inst)
+
 function Base.show(io::IO, alloc::AllocInstance)
-    typ = guess_julia_type(alloc.inst)
+    typ = alloc_type(alloc)
 
     if length(alloc.backtrace) == 0
         Base.printstyled(io, "Allocation", color=:red, bold=true)
@@ -315,6 +317,6 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
 end
 
 
-export check_allocs
+export check_allocs, alloc_type
 
 end

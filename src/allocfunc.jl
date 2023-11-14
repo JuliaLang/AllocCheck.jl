@@ -107,7 +107,7 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
                     return res
                 end
             end
-
+            
             if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_alloc_string", "jl_alloc_string"))
                 return String
             end
@@ -115,6 +115,18 @@ function guess_julia_type(val::LLVM.Value, typeof=true)
             if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_array_copy", "jl_array_copy"))
                 return Array
             end
+            if VERSION > v"1.11.0-DEV.753"
+                if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("ijl_genericmemory_copy", "jl_genericmemory_copy"))
+                    return Memory
+                end
+                if isa(fn, LLVM.Function) && in(LLVM.name(fn), ("jl_alloc_genericmemory", "ijl_alloc_genericmemory"))
+                    res = guess_julia_type(operands(val)[1], false)
+                    if res !== nothing
+                        return res
+                    end
+                end
+            end
+
             if isa(fn, LLVM.Function) && occursin(r"(ijl_|jl_)box_(.*)", name(fn))
                 typestr = match(r"(ijl_|jl_)box_(.*)", name(fn)).captures[end]
                 typestr == "bool" && return Bool
