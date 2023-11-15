@@ -268,7 +268,7 @@ function check_allocs(@nospecialize(func), @nospecialize(types); entry_abi=:spec
     job = create_job(func, types; entry_abi)
     allocs = AllocInstance[]
     mod = JuliaContext() do ctx
-        ir = GPUCompiler.compile(:llvm, job, validate=false)
+        ir = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
         mod = ir[1]
         optimize!(job, mod)
         # display(mod)
