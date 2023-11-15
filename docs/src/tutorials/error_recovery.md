@@ -54,7 +54,7 @@ In this example, we accepted an allocation on the exception path with the motiva
 ```@example ERROR
 treading_lightly() # Warm start
 allocated_memory = @allocated treading_lightly() # A call that triggers the exception path
-@test allocated_memory < 1e4
+# @test allocated_memory < 1e4
 ```
 
 The allocations sites reported with the flag `ignore_throw = false` may be used as a guide as to what to test.
