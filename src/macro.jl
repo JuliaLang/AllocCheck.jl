@@ -1,0 +1,123 @@
+using ExprTools: splitdef, combinedef
+using MacroTools: splitarg, combinearg
+
+_is_func_def(ex) = Meta.isexpr(ex, :function) || Base.is_short_function_def(ex) || Meta.isexpr(ex, :->)
+
+function extract_keywords(ex0)
+    kws = Dict{Symbol, Any}()
+    arg = ex0[end]
+    for i in 1:length(ex0)-1
+        x = ex0[i]
+        if x isa Expr && x.head === :(=) # Keyword given of the form "foo=bar"
+            if length(x.args) != 2
+               error("Invalid keyword argument: $x")
+            end
+            if x.args[1] != :ignore_throw || !(x.args[2] isa Bool)
+                return error("@check_allocs received unexpected argument: $(x)")
+            end
+            kws[x.args[1]] = x.args[2]
+        else
+            return error("@check_allocs expects only one non-keyword argument")
+        end
+    end
+    return kws, arg
+end
+
+macro check_allocs(ex...)
+    kws, body = extract_keywords(ex)
+    if _is_func_def(body)
+        return _check_allocs_macro(body, __module__, __source__; kws...)
+    else
+        error("@check_allocs used on something other than a function definition")
+    end
+end
+
+function normalize_args!(func_def)
+    name = get(func_def, :name, :(__anon))
+    if haskey(func_def, :name)
+        # e.g. function (f::Foo)(a::Int, b::Int)
+        func_def[:name] isa Expr && (pushfirst!(func_def[:args], name);)
+        func_def[:name] = gensym(name isa Symbol ? name : gensym())
+    end
+    if haskey(func_def, :kwargs)
+        if !haskey(func_def, :args)
+            func_def[:args] = Any[]
+        end
+        for arg in func_def[:kwargs]
+            Meta.isexpr(arg, :kw) && (arg = arg.args[1];)
+            push!(func_def[:args], arg)
+        end
+        empty!(func_def[:kwargs])
+    end
+end
+
+"""
+Takes a function definition and returns the expressions needed to forward the arguments to an inner function.
+
+For example `function foo(a, ::Int, c...; x, y=1, z...)` will
+1. modify the function to `gensym()` nameless arguments
+2. return `(:a, gensym(), :(c...)), (:x, :y, :(z...)))`
+"""
+function forward_args!(func_def)
+    args = []
+    if haskey(func_def, :name) && func_def[:name] isa Expr
+        name, type, splat, default = splitarg(func_def[:name])
+        name = something(name, gensym())
+        push!(args, splat ? :($name...) : name)
+        func_def[:name] = combinearg(name, type, splat, default)
+    end
+    if haskey(func_def, :args)
+        func_def[:args] = map(func_def[:args]) do arg
+            name, type, splat, default = splitarg(arg)
+            name = something(name, gensym())
+            push!(args, splat ? :($name...) : name)
+            combinearg(name, type, splat, default)
+        end
+    end
+    kwargs = []
+    if haskey(func_def, :kwargs)
+        for arg in func_def[:kwargs]
+            name, type, splat, default = splitarg(arg)
+            push!(kwargs, splat ? :($name...) : name)
+        end
+    end
+    args, kwargs
+end
+
+function _check_allocs_macro(ex::Expr, mod::Module, source::LineNumberNode; ignore_throw=true)
+
+    # Transform original function to a renamed version with flattened args
+    def = splitdef(deepcopy(ex))
+    normalize_args!(def)
+    original_fn = combinedef(def)
+    f_sym = haskey(def, :name) ? gensym(def[:name]) : gensym()
+
+    # Next, create a wrapper function that will compile the original function on-the-fly.
+    def = splitdef(ex)
+    fwd_args, fwd_kwargs = forward_args!(def)
+    haskey(def, :name) && (def[:name] = esc(def[:name]);)
+    haskey(def, :args) && (def[:args] = esc.(def[:args]);)
+    haskey(def, :kwargs) && (def[:kwargs] = esc.(def[:kwargs]);)
+    haskey(def, :whereparams) && (def[:whereparams] = esc.(def[:whereparams]);)
+
+    # The way that `compile_callable` works is by doing a dynamic dispatch and
+    # on-the-fly compilation.
+    def[:body] = quote
+        callable_tt = Tuple{map(Core.Typeof, ($(esc.(fwd_args)...),$(esc.(fwd_kwargs)...)))...}
+        callable = $compile_callable($f_sym, callable_tt; ignore_throw=$ignore_throw)
+        if (length(callable.analysis) > 0)
+            throw(AllocCheckFailure(callable.analysis))
+        end
+        callable($(esc.(fwd_args)...), $(esc.(fwd_kwargs)...))
+    end
+
+    # Replace function definition line number node with that from source
+    @assert def[:body].args[1] isa LineNumberNode
+    def[:body].args[1] = source
+
+    wrapper_fn = combinedef(def)
+    return quote
+        local $f_sym = $(esc(original_fn))
+        $(wrapper_fn)
+    end
+end
