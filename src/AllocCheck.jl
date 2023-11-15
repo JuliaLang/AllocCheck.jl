@@ -141,13 +141,53 @@ struct AllocationSite
     backtrace::Vector{Base.StackTraces.StackFrame}
 end
 
-function Base.:(==)(self::AllocationSite, other::AllocationSite)
-    return (self.type == other.type) && (self.backtrace == other.backtrace)
+function nice_hash(backtrace::Vector{Base.StackTraces.StackFrame}, h::UInt)
+    # `func_id` - Uniquely identifies this function (a method instance in julia, and
+    # a function in C/C++).
+    # Note that this should be unique even for several different functions all
+    # inlined into the same frame.
+    for frame in backtrace
+        h = if frame.linfo !== nothing
+            hash(frame.linfo, h)
+        else
+            hash((frame.func, frame.file, frame.line, frame.inlined), h)
+        end
+    end
+    return h
+end
+
+function nice_isequal(self::Vector{Base.StackTraces.StackFrame}, other::Vector{Base.StackTraces.StackFrame})
+    if length(self) != length(other)
+        return false
+    end
+    for (a, b) in zip(self, other)
+        if a.linfo !== b.linfo
+            return false
+        end
+        if a.func !== b.func
+            return false
+        end
+        if a.file !== b.file
+            return false
+        end
+        if a.line !== b.line
+            return false
+        end
+        if a.inlined !== b.inlined
+            return false
+        end
+    end
+    return true
 end
 
 function Base.hash(alloc::AllocationSite, h::UInt)
-    return Base.hash(alloc.type, Base.hash(alloc.backtrace, h))
+    return Base.hash(alloc.type, nice_hash(alloc.backtrace, h))
 end
+
+function Base.:(==)(self::AllocationSite, other::AllocationSite)
+    return (self.type == other.type) && (nice_isequal(self.backtrace,other.backtrace))
+end
+
 
 function Base.show(io::IO, alloc::AllocationSite)
     if length(alloc.backtrace) == 0
