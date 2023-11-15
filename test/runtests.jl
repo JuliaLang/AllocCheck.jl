@@ -75,3 +75,54 @@ end
         # TODO: Add test for `jl_genericmemory_copy`
     end
 end
+
+@testset "AllocationSite" begin
+    iob = IOBuffer()
+    alloc_with_no_bt = AllocCheck.AllocationSite(Float32, Base.StackTraces.StackFrame[])
+    show(iob, alloc_with_no_bt)
+    @test occursin("unknown location", String(take!(iob)))
+
+    alloc_with_bt = AllocCheck.AllocationSite(Float32, Base.stacktrace())
+    show(iob, alloc_with_bt) === nothing
+    @test !occursin("unknown location", String(take!(iob)))
+end
+
+@testset "repeated allocations" begin
+    send_control(u) = sum(abs2, u) # Dummy control function
+    calc_control() = 1.0
+    get_measurement() = [1.0]
+
+    function example_loop(data, t_start, y_start, y_old, ydf, Ts, N, r)
+        for i = 1:N
+            t = time() - t_start
+            y = get_measurement()[] - y_start # Subtract initial position for a smoother experience
+            yd = (y - y_old) / Ts
+            ydf = 0.9*ydf + 0.1*yd
+            # r = 45sin(2π*freq*t)
+            u = calc_control()
+            send_control([u])
+            log = [t, y, ydf, u, r(t)]
+            data[:, i] .= log
+            y_old = y
+        end
+    end
+
+    ## Generate some example input data
+    r = t->(2 + 2floor(t/4)^2)
+    N = 10
+    data = Matrix{Float64}(undef, 5, N)
+    t_start = 1.0
+    y_start = 0.0
+    y_old = 0.0
+    ydf = 0.0
+    Ts = 1.0
+
+    typetuple = typeof.((data, t_start, y_start, y_old, ydf, Ts, N, r))
+    @test allunique(check_allocs(example_loop, typetuple, ignore_throw=true))
+    foobar() = stacktrace()
+    stack1 = foobar()
+    stack2 = stacktrace()
+    allocs = [AllocCheck.AllocationSite(Any,stack1), AllocCheck.AllocationSite(Any,stack2), AllocCheck.AllocationSite(Any,stack1)]
+    @test !allunique(allocs)
+    @test length(unique(allocs)) == 2
+end
