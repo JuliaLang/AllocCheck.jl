@@ -170,11 +170,13 @@ end
 
 @testset "Types of Allocations" begin
     if VERSION > v"1.11.0-DEV.753"
-
         # TODO: Fix this (it was only working before because of our optimization pipeline)
-        # @test alloc_type(check_allocs(memory_alloc, (); ignore_throw = false)[1]) == Memory{Int}
+        # @test any(x.type == Memory{Int} for x in check_allocs(memory_alloc, (); ignore_throw = false))
 
         # TODO: Add test for `jl_genericmemory_copy`
+
+        # TODO: types are broken on the new pipeline =(
+        # @test any(alloc.type == Ref{Int} for alloc in check_allocs(()->Ref{Int64}(), ()))
     end
 end
 
@@ -186,6 +188,22 @@ end
 
     alloc_with_bt = AllocCheck.AllocationSite(Float32, Base.stacktrace())
     show(iob, alloc_with_bt) === nothing
+    @test !occursin("unknown location", String(take!(iob)))
+
+    call_with_no_bt = AllocCheck.AllocatingRuntimeCall("jl_subtype", Base.StackTraces.StackFrame[])
+    show(iob, call_with_no_bt)
+    @test occursin("unknown location", String(take!(iob)))
+
+    call_with_bt = AllocCheck.AllocatingRuntimeCall("jl_subtype", Base.stacktrace())
+    show(iob, call_with_bt) === nothing
+    @test !occursin("unknown location", String(take!(iob)))
+
+    dispatch_with_no_bt = AllocCheck.DynamicDispatch(Base.StackTraces.StackFrame[])
+    show(iob, dispatch_with_no_bt)
+    @test occursin("unknown location", String(take!(iob)))
+
+    dispatch_with_bt = AllocCheck.DynamicDispatch(Base.stacktrace())
+    show(iob, dispatch_with_bt) === nothing
     @test !occursin("unknown location", String(take!(iob)))
 end
 

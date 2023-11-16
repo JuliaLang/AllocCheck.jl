@@ -6,173 +6,17 @@ using LLVM: BasicBlock, ConstantExpr, ConstantInt, IRBuilder, UndefValue, blocks
             called_operand, dispose, dominates, instructions, metadata, name, opcode,
             operands, position!, ret!, successors, switch!, uses, user
 
-include("allocfunc.jl")
-include("utils.jl")
+include("static_backtrace.jl")
+include("abi_call.jl")
+include("classify.jl")
 include("compiler.jl")
 include("macro.jl")
-include("abi_call.jl")
+include("types.jl")
+include("utils.jl")
 
 module Runtime end
 
-# generate a pseudo-backtrace from LLVM IR instruction debug information
-#
-# this works by looking up the debug information of the instruction, and inspecting the call
-# sites of the containing function. if there's only one, repeat the process from that call.
-# finally, the debug information is converted to a Julia stack trace.
-function backtrace_(inst::LLVM.Instruction, bt=StackTraces.StackFrame[]; compiled::Union{Nothing,Dict{Any,Any}}=nothing)
-    done = Set{LLVM.Instruction}()
-    while true
-        if in(inst, done)
-            break
-        end
-        push!(done, inst)
-        f = LLVM.parent(LLVM.parent(inst))
-
-        # look up the debug information from the current instruction
-        if haskey(metadata(inst), LLVM.MD_dbg)
-            loc = metadata(inst)[LLVM.MD_dbg]
-            while loc !== nothing
-                scope = LLVM.scope(loc)
-                if scope !== nothing
-                    emitted_name = LLVM.name(f)
-                    name = replace(LLVM.name(scope), r";$" => "")
-                    file = LLVM.file(scope)
-                    path = joinpath(LLVM.directory(file), LLVM.filename(file))
-                    line = LLVM.line(loc)
-                    linfo = nothing
-                    from_c = false
-                    inlined = LLVM.inlined_at(loc) !== nothing
-                    !inlined && for (mi, (; ci, func, specfunc)) in compiled
-                        if safe_name(func) == emitted_name || safe_name(specfunc) == emitted_name
-                            linfo = mi
-                            break
-                        end
-                    end
-                    push!(bt, StackTraces.StackFrame(Symbol(name), Symbol(path), line,
-                        linfo, from_c, inlined, 0))
-                end
-                loc = LLVM.inlined_at(loc)
-            end
-        end
-
-        # move up the call chain
-        ## functions can be used as a *value* in eg. constant expressions, so filter those out
-        callers = filter(val -> isa(user(val), LLVM.CallInst), collect(uses(f)))
-        ## get rid of calls without debug info
-        filter!(callers) do call
-            md = metadata(user(call))
-            haskey(md, LLVM.MD_dbg)
-        end
-        if !isempty(callers)
-            # figure out the call sites of this instruction
-            call_sites = unique(callers) do call
-                # there could be multiple calls, originating from the same source location
-                md = metadata(user(call))
-                md[LLVM.MD_dbg]
-            end
-
-            if length(call_sites) > 1
-                frame = StackTraces.StackFrame("multiple call sites", "unknown", 0)
-                push!(bt, frame)
-            elseif length(call_sites) == 1
-                inst = user(first(call_sites))
-                continue
-            end
-        end
-        break
-    end
-
-    return bt
-end
-
-struct AllocationSite
-    type::Any
-    backtrace::Vector{Base.StackTraces.StackFrame}
-end
-
-function nice_hash(backtrace::Vector{Base.StackTraces.StackFrame}, h::UInt)
-    # `func_id` - Uniquely identifies this function (a method instance in julia, and
-    # a function in C/C++).
-    # Note that this should be unique even for several different functions all
-    # inlined into the same frame.
-    for frame in backtrace
-        h = if frame.linfo !== nothing
-            hash(frame.linfo, h)
-        else
-            hash((frame.func, frame.file, frame.line, frame.inlined), h)
-        end
-    end
-    return h
-end
-
-function nice_isequal(self::Vector{Base.StackTraces.StackFrame}, other::Vector{Base.StackTraces.StackFrame})
-    if length(self) != length(other)
-        return false
-    end
-    for (a, b) in zip(self, other)
-        if a.linfo !== b.linfo
-            return false
-        end
-        if a.func !== b.func
-            return false
-        end
-        if a.file !== b.file
-            return false
-        end
-        if a.line !== b.line
-            return false
-        end
-        if a.inlined !== b.inlined
-            return false
-        end
-    end
-    return true
-end
-
-function Base.hash(alloc::AllocationSite, h::UInt)
-    return Base.hash(alloc.type, nice_hash(alloc.backtrace, h))
-end
-
-function Base.:(==)(self::AllocationSite, other::AllocationSite)
-    return (self.type == other.type) && (nice_isequal(self.backtrace,other.backtrace))
-end
-
-
-function Base.show(io::IO, alloc::AllocationSite)
-    if length(alloc.backtrace) == 0
-        Base.printstyled(io, "Allocation", color=:red, bold=true)
-        # TODO: Even when backtrace fails, we should report at least 1 stack frame
-        Base.println(io, " of ", alloc.type, " in unknown location")
-    else
-        Base.printstyled(io, "Allocation", color=:red, bold=true)
-        Base.println(io, " of ", alloc.type, " in ", alloc.backtrace[1].file, ":", alloc.backtrace[1].line)
-
-        # Print code excerpt of allocation site
-        try
-            source = open(fixup_source_path(alloc.backtrace[1].file))
-            Base.print(io, "  | ")
-            Base.println(io, strip(readlines(source)[alloc.backtrace[1].line]))
-            close(source)
-        catch
-            Base.print(io, "  | (source not available)")
-        end
-
-        # Print backtrace
-        Base.show_backtrace(io, alloc.backtrace)
-        Base.println(io)
-    end
-end
-
-struct AllocCheckFailure
-    allocs::Vector
-end
-
-function Base.show(io::IO, failure::AllocCheckFailure)
-    Base.println(io, "@check_alloc function contains ", length(failure.allocs), " allocations.")
-end
-
-
-function rename_calls_and_throws!(f::LLVM.Function)
+function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
 
     # In order to detect whether an instruction executes only when
     # throwing an error, we re-write all throw/catches to pass through
@@ -197,7 +41,7 @@ function rename_calls_and_throws!(f::LLVM.Function)
     for block in blocks(f)
         for inst in instructions(block)
             if isa(inst, LLVM.CallInst)
-                rename_ir!(inst)
+                rename_call!(inst, mod)
                 decl = called_operand(inst)
 
                 # `throw`: Add pseudo-edge to any_throw
@@ -252,13 +96,13 @@ This function modifies the LLVM module in-place, effectively trashing it.
 function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
     (; entry, compiled) = meta
 
-    allocs = AllocationSite[]
+    errors = []
     worklist = LLVM.Function[ entry ]
     seen = LLVM.Function[ entry ]
     while !isempty(worklist)
         f = pop!(worklist)
 
-        throw_, catch_ = rename_calls_and_throws!(f)
+        throw_, catch_ = rename_calls_and_throws!(f, mod)
         domtree = LLVM.DomTree(f)
         postdomtree = LLVM.PostDomTree(f)
         for block in blocks(f)
@@ -272,11 +116,28 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
                     catch_only = dominates(domtree, catch_, inst)
                     ignore_throw && catch_only && continue
 
-                    if is_alloc_function(name(decl), ignore_throw)
-                        bt = backtrace_(inst; compiled)
-                        typ = guess_julia_type(inst)
-                        alloc = AllocationSite(typ, bt)
-                        push!(allocs, alloc)
+                    class, may_allocate = classify_runtime_fn(name(decl); ignore_throw)
+
+                    if may_allocate
+                        if class === :alloc
+                            allocs = resolve_allocations(inst)
+                            if allocs === nothing # failed to resolve
+                                bt = backtrace_(inst; compiled)
+                                push!(errors, AllocationSite(Any, bt))
+                            else
+                                for (inst_, typ) in allocs
+                                    bt = backtrace_(inst_; compiled)
+                                    push!(errors, AllocationSite(typ, bt))
+                                end
+                            end
+                        elseif class === :dispatch
+                            bt = backtrace_(inst; compiled)
+                            push!(errors, DynamicDispatch(bt))
+                        elseif class === :runtime
+                            bt = backtrace_(inst; compiled)
+                            fname = replace(name(decl), r"^ijl_"=>"jl_")
+                            push!(errors, AllocatingRuntimeCall(fname, bt))
+                        else @assert false end
                     end
 
                     if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
@@ -289,9 +150,10 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
         dispose(postdomtree)
         dispose(domtree)
     end
+
     # TODO: dispose(mod)
     # dispose(mod)
-    return allocs
+    return errors
 end
 
 """
