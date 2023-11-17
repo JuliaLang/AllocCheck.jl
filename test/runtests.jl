@@ -42,10 +42,7 @@ end
     @test length(check_allocs(sin, (Float64,); ignore_throw=true)) == 0
     @test length(check_allocs(*, (Matrix{Float64},Matrix{Float64}); ignore_throw=true)) != 0
 
-    # TODO: Fix regression on 1.10
-    # This requires splitting an allocation which has been separated into two different
-    # use sites that store different type tags.
-    # @test length(check_allocs(alloc_in_catch, (); ignore_throw=false)) == 2
+    @test length(check_allocs(alloc_in_catch, (); ignore_throw=false)) == 2
     @test length(check_allocs(alloc_in_catch, (); ignore_throw=true)) == 1
 
     @test length(check_allocs(same_ccall, (); ignore_throw=false)) > 0
@@ -170,17 +167,21 @@ end
 
 @testset "Types of Allocations" begin
     if VERSION > v"1.11.0-DEV.753"
-        # TODO: Fix this (it was only working before because of our optimization pipeline)
-        # @test any(x.type == Memory{Int} for x in check_allocs(memory_alloc, (); ignore_throw = false))
+        @test any(x.type == Memory{Int} for x in check_allocs(memory_alloc, (); ignore_throw = false))
+        @test any(x.type == Memory for x in check_allocs(()->copy(Memory{Int}(undef, 10)),()))
 
-        # TODO: Add test for `jl_genericmemory_copy`
-
-        # TODO: types are broken on the new pipeline =(
-        # @test any(alloc.type == Ref{Int} for alloc in check_allocs(()->Ref{Int64}(), ()))
+        # TODO: Add support jl_genericmemory_copy_slice
+        # @test any(x.type == Memory for x in check_allocs((x)->copy(x),(Vector{Int}),))
     end
+
+    @test any(alloc.type == Base.RefValue{Int} for alloc in check_allocs(()->Ref{Int}(), ()))
+
+    allocs1 = check_allocs(()->Ref{Vector{Int64}}(Int64[]), ())
+    @test any(alloc.type == Base.RefValue{Vector{Int64}} for alloc in allocs1)
+    @test any(alloc.type == Vector{Int64} for alloc in allocs1)
 end
 
-@testset "AllocationSite" begin
+@testset "Error types" begin
     iob = IOBuffer()
     alloc_with_no_bt = AllocCheck.AllocationSite(Float32, Base.StackTraces.StackFrame[])
     show(iob, alloc_with_no_bt)

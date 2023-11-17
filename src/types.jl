@@ -24,6 +24,7 @@ function Base.show(io::IO, call::AllocatingRuntimeCall)
     end
 end
 
+
 struct DynamicDispatch
     backtrace::Vector{Base.StackTraces.StackFrame}
 end
@@ -38,15 +39,16 @@ end
 
 function Base.show(io::IO, dispatch::DynamicDispatch)
     if length(dispatch.backtrace) == 0
-        Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
+        Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
         # TODO: Even when backtrace fails, we should report at least 1 stack frame
         Base.println(io, " in unknown location")
     else
-        Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
+        Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
         Base.println(io, " in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
         show_backtrace_and_excerpt(io, dispatch.backtrace)
     end
 end
+
 
 struct AllocationSite
     type::Any
@@ -115,11 +117,16 @@ function Base.show(io::IO, alloc::AllocationSite)
 end
 
 struct AllocCheckFailure
-    allocs::Vector
+    errors::Vector
 end
 
 function Base.show(io::IO, failure::AllocCheckFailure)
-    Base.println(io, "@check_alloc function contains ", length(failure.allocs), " allocations.")
+    allocs = count(err isa AllocationSite || err isa AllocatingRuntimeCall for err in failure.errors)
+    dispatches = count(err isa DynamicDispatch for err in failure.errors)
+
+    Base.print(io, "@check_alloc function encountered ")
+    Base.printstyled(io, length(failure.errors), color=:red, bold=true)
+    Base.print(io, " errors ($(allocs) allocations / $(dispatches) dynamic dispatches).")
 end
 
 function show_backtrace_and_excerpt(io::IO, backtrace::Vector{Base.StackTraces.StackFrame})

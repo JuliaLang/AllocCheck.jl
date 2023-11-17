@@ -118,26 +118,26 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
 
                     class, may_allocate = classify_runtime_fn(name(decl); ignore_throw)
 
-                    if may_allocate
-                        if class === :alloc
-                            allocs = resolve_allocations(inst)
-                            if allocs === nothing # failed to resolve
-                                bt = backtrace_(inst; compiled)
-                                push!(errors, AllocationSite(Any, bt))
-                            else
-                                for (inst_, typ) in allocs
-                                    bt = backtrace_(inst_; compiled)
-                                    push!(errors, AllocationSite(typ, bt))
-                                end
+                    if class === :alloc
+                        allocs = resolve_allocations(inst)
+                        if allocs === nothing # TODO: failed to resolve
+                            bt = backtrace_(inst; compiled)
+                            push!(errors, AllocationSite(Any, bt))
+                        else
+                            for (inst_, typ) in allocs
+                                bt = backtrace_(inst_; compiled)
+                                push!(errors, AllocationSite(typ, bt))
                             end
-                        elseif class === :dispatch
-                            bt = backtrace_(inst; compiled)
-                            push!(errors, DynamicDispatch(bt))
-                        elseif class === :runtime
-                            bt = backtrace_(inst; compiled)
-                            fname = replace(name(decl), r"^ijl_"=>"jl_")
-                            push!(errors, AllocatingRuntimeCall(fname, bt))
-                        else @assert false end
+                        end
+                        @assert may_allocate
+                    elseif class === :dispatch
+                        bt = backtrace_(inst; compiled)
+                        push!(errors, DynamicDispatch(bt))
+                        @assert may_allocate
+                    elseif class === :runtime && may_allocate
+                        bt = backtrace_(inst; compiled)
+                        fname = replace(name(decl), r"^ijl_"=>"jl_")
+                        push!(errors, AllocatingRuntimeCall(fname, bt))
                     end
 
                     if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
@@ -153,6 +153,8 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
 
     # TODO: dispose(mod)
     # dispose(mod)
+
+    unique!(errors)
     return errors
 end
 
@@ -191,8 +193,6 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
         # dispose(mod)
         allocs
     end
-
-    unique!(allocs)
     return allocs
 end
 

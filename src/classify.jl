@@ -13,7 +13,7 @@ perform allocation, but which might allocate to get its job done (e.g. jl_subtyp
 function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
     match_ = match(r"^(ijl_|jl_)(.*)$", name)
 
-    isnothing(match_) && return (:external, false)
+    isnothing(match_) && return (:unknown, false)
     name = match_[2]
 
     may_alloc = fn_may_allocate(name; ignore_throw)
@@ -151,6 +151,7 @@ function resolve_allocations(call::LLVM.Value)
         typestr == "voidpointer" && return [(call, Ptr{Cvoid})]
         @assert false # above is exhaustive
     elseif name == "gc_pool_alloc"
+        seen = Set()
         allocs = Tuple{LLVM.Inst, Any}[]
         for calluse in transitive_uses(call; unwrap = (use)->user(use) isa LLVM.BitCastInst)
             gep = user(calluse)
@@ -162,7 +163,6 @@ function resolve_allocations(call::LLVM.Value)
             (convert(Int, offset) != -1) && continue
 
             # Now, look for the store into the type tag and count that as our allocation(s)
-            seen = Set()
             for gepuse in uses(gep)
                 store = user(use)
                 !isa(store, LLVM.StoreInst) && continue
