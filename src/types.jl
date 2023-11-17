@@ -27,7 +27,7 @@ end
 
 struct DynamicDispatch
     backtrace::Vector{Base.StackTraces.StackFrame}
-    fname::Union{Symbol, Nothing}
+    fname::Any
 end
 
 function Base.hash(self::DynamicDispatch, h::UInt)
@@ -39,30 +39,17 @@ function Base.:(==)(self::DynamicDispatch, other::DynamicDispatch)
 end
 
 function Base.show(io::IO, dispatch::DynamicDispatch)
+    Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
     if dispatch.fname !== nothing
-        if length(dispatch.backtrace) == 0
-            Base.printstyled(io, "Dynamic dispatch ", color=:magenta, bold=true)
-            # TODO: Even when backtrace fails, we should report at least 1 stack frame
-            Base.print(io, " to function ")
-            Base.printstyled(io, dispatch.fname, bold=true)
-            Base.println(io," in unknown location")
-        else
-            Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
-            Base.print(io, " to function ")
-            Base.printstyled(io, dispatch.fname, bold=true)
-            Base.println(io," in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
-            show_backtrace_and_excerpt(io, dispatch.backtrace)
-        end
+        Base.print(io, " to function ")
+        Base.printstyled(io, dispatch.fname, bold=true)
+    end
+    if length(dispatch.backtrace) == 0
+        # TODO: Even when backtrace fails, we should report at least 1 stack frame
+        Base.println(io," in unknown location")
     else
-        if length(dispatch.backtrace) == 0
-            Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
-            # TODO: Even when backtrace fails, we should report at least 1 stack frame
-            Base.println(io, " in unknown location")
-        else
-            Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
-            Base.println(io, " in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
-            show_backtrace_and_excerpt(io, dispatch.backtrace)
-        end
+        Base.println(io," in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
+        show_backtrace_and_excerpt(io, dispatch.backtrace)
     end
 end
 

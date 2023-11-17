@@ -51,7 +51,7 @@ function resolve_dispatch_target(inst::LLVM.Instruction)
         if isa(flib, ConstantInt)
             rep = reinterpret(Ptr{Cvoid}, convert(Csize_t, flib))
             flib = Base.unsafe_pointer_to_objref(rep)
-            return nameof(flib)
+            return flib
         end
     end
     return nothing
