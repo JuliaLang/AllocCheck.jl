@@ -18,6 +18,6 @@ makedocs(
 )
 
 deploydocs(
-      repo = "github.com/JuliaComputing/AllocCheck.jl.git",
+      repo = "github.com/JuliaLang/AllocCheck.jl.git",
       push_preview = true,
 )
