@@ -33,6 +33,31 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
 
 end
 
+const generic_method_offsets = Dict{String,Tuple{Int,Int}}(("jl_f__apply_latest" => (2, 3), "ijl_f__apply_latest" => (2, 3),
+    "jl_f__call_latest" => (2, 3), "ijl_f__call_latest" => (2, 3), "jl_f_invoke" => (2, 3), "jl_invoke" => (1, 3),
+    "jl_apply_generic" => (1, 2), "ijl_f_invoke" => (2, 3), "ijl_invoke" => (1, 3), "ijl_apply_generic" => (1, 2)))
+
+function classify_dispatch(inst::LLVM.Instruction)
+    @assert isa(inst, LLVM.CallInst)
+    fun = LLVM.called_operand(inst)
+    if isa(fun, LLVM.Function) && in(LLVM.name(fun), keys(generic_method_offsets))
+        offset, start = generic_method_offsets[LLVM.name(fun)]
+
+        flib = operands(inst)[offset]
+        flib = unwrap_ptr_casts(flib)
+        flib = look_through_loads(flib)
+        while isa(flib, LLVM.ConstantExpr)
+            flib = LLVM.Value(LLVM.LLVM.API.LLVMGetOperand(flib, 0))
+        end
+        if isa(flib, ConstantInt)
+            rep = reinterpret(Ptr{Cvoid}, convert(Csize_t, flib))
+            flib = Base.unsafe_pointer_to_objref(rep)
+            return nameof(flib)
+        end
+    end
+    return nothing
+end
+
 function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
     if name in ("egal__unboxed", "lock_value", "unlock_value", "get_nth_field_noalloc",
                 "load_and_lookup", "lazy_load_and_lookup", "box_bool", "box_int8",

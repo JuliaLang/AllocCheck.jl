@@ -138,8 +138,9 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
                         end
                         @assert may_allocate
                     elseif class === :dispatch
+                        fname = classify_dispatch(inst)
                         bt = backtrace_(inst; compiled)
-                        push!(errors, DynamicDispatch(bt))
+                        push!(errors, DynamicDispatch(bt, fname))
                         @assert may_allocate
                     elseif class === :runtime && may_allocate
                         bt = backtrace_(inst; compiled)

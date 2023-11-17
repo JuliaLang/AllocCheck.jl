@@ -27,33 +27,46 @@ end
 
 struct DynamicDispatch
     backtrace::Vector{Base.StackTraces.StackFrame}
+    fname::Union{Symbol, Nothing}
 end
 
 function Base.hash(self::DynamicDispatch, h::UInt)
-    return nice_hash(self.backtrace, h)
+    if self.fname === nothing
+        return nice_hash(self.backtrace, h)
+    else
+        return Base.hash(self.fname, nice_hash(self.backtrace, h))
+    end
 end
 
 function Base.:(==)(self::DynamicDispatch, other::DynamicDispatch)
-    return nice_isequal(self.backtrace,other.backtrace)
+    return (self.name === other.name) && (nice_isequal(self.backtrace,other.backtrace))
 end
 
 function Base.show(io::IO, dispatch::DynamicDispatch)
-    if length(dispatch.backtrace) == 0
-        if VERSION >= v"1.10-beta3"
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
+    if dispatch.fname !== nothing
+        if length(dispatch.backtrace) == 0
+            Base.printstyled(io, "Dynamic dispatch ", color=:magenta, bold=true)
+            # TODO: Even when backtrace fails, we should report at least 1 stack frame
+            Base.print(io, " to function ")
+            Base.printstyled(io, dispatch.fname, bold=true)
+            Base.println(io," in unknown location")
         else
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
+            Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
+            Base.print(io, " to function ")
+            Base.printstyled(io, dispatch.fname, bold=true)
+            Base.println(io," in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
+            show_backtrace_and_excerpt(io, dispatch.backtrace)
         end
-        # TODO: Even when backtrace fails, we should report at least 1 stack frame
-        Base.println(io, " in unknown location")
     else
-        if VERSION >= v"1.10-beta3"
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
+        if length(dispatch.backtrace) == 0
+            Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
+            # TODO: Even when backtrace fails, we should report at least 1 stack frame
+            Base.println(io, " in unknown location")
         else
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
+            Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
+            Base.println(io, " in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
+            show_backtrace_and_excerpt(io, dispatch.backtrace)
         end
-        Base.println(io, " in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
-        show_backtrace_and_excerpt(io, dispatch.backtrace)
     end
 end
 
