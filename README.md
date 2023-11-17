@@ -21,14 +21,14 @@ julia> multiply(1.5, 2.5) # call automatically checked for allocations
 3.75
 
 julia> multiply(rand(3,3), rand(3,3)) # result matrix requires an allocation
-ERROR: @check_alloc function contains 1 allocations.
+ERROR: @check_alloc function encountered 1 errors (1 allocations / 0 dynamic dispatches).
 ```
 
 The `multiply(::Float64, ::Float64)` call happened without error, indicating that the function was proven not to allocate. On the other hand, the `multiply(::Matrix{Float64}, ::Matrix{Float64})` call raised an `AllocCheckFailure` due to one internal allocation.
 
-The `allocs` field can be used to inspect the individual errors:
+The `errors` field can be used to inspect the individual errors:
 ```julia
-julia> try multiply(rand(3,3), rand(3,3)) catch err err.allocs[1] end
+julia> try multiply(rand(3,3), rand(3,3)) catch err err.errors[1] end
 Allocation of Matrix{Float64} in ./boot.jl:477
   | Array{T,2}(::UndefInitializer, m::Int, n::Int) where {T} =
 
@@ -65,7 +65,7 @@ julia> mysin1(1.5)
 0.9974949866040544
 
 julia> mysin2(1.5)
-ERROR: @check_alloc function contains 2 allocations.
+ERROR: @check_alloc function encountered 2 errors (1 allocations / 1 dynamic dispatches).
 ```
 
 #### Limitations

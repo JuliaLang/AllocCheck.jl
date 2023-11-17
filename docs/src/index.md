@@ -31,7 +31,7 @@ The `errors` field allows us to inspect the individual errors to get some useful
 try
   linsolve(rand(10,10), rand(10))
 catch err
-  err.allocs[1]
+  err.errors[1]
 end
 ```
 
