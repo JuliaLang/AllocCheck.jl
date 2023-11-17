@@ -199,12 +199,20 @@ end
     show(iob, call_with_bt) === nothing
     @test !occursin("unknown location", String(take!(iob)))
 
-    dispatch_with_no_bt = AllocCheck.DynamicDispatch(Base.StackTraces.StackFrame[])
-    show(iob, dispatch_with_no_bt)
+    dispatch_with_no_bt_nothing = AllocCheck.DynamicDispatch(Base.StackTraces.StackFrame[], nothing)
+    show(iob, dispatch_with_no_bt_nothing)
     @test occursin("unknown location", String(take!(iob)))
 
-    dispatch_with_bt = AllocCheck.DynamicDispatch(Base.stacktrace())
-    show(iob, dispatch_with_bt) === nothing
+    dispatch_with_no_bt_foo = AllocCheck.DynamicDispatch(Base.StackTraces.StackFrame[], :foo)
+    show(iob, dispatch_with_no_bt_foo)
+    @test occursin("to function foo", String(take!(iob)))
+
+    dispatch_with_bt_nothing = AllocCheck.DynamicDispatch(Base.stacktrace(), nothing)
+    show(iob, dispatch_with_bt_nothing) === nothing
+    @test !occursin("unknown location", String(take!(iob)))
+
+    dispatch_with_bt_foo = AllocCheck.DynamicDispatch(Base.stacktrace(), :foo)
+    show(iob, dispatch_with_bt_foo) === nothing
     @test !occursin("unknown location", String(take!(iob)))
 end
 

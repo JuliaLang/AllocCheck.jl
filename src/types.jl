@@ -27,32 +27,28 @@ end
 
 struct DynamicDispatch
     backtrace::Vector{Base.StackTraces.StackFrame}
+    fname::Any
 end
 
 function Base.hash(self::DynamicDispatch, h::UInt)
-    return nice_hash(self.backtrace, h)
+    return Base.hash(self.fname, nice_hash(self.backtrace, h))
 end
 
 function Base.:(==)(self::DynamicDispatch, other::DynamicDispatch)
-    return nice_isequal(self.backtrace,other.backtrace)
+    return (self.name === other.name) && (nice_isequal(self.backtrace,other.backtrace))
 end
 
 function Base.show(io::IO, dispatch::DynamicDispatch)
+    Base.printstyled(io, "Dynamic dispatch", color=:magenta, bold=true)
+    if dispatch.fname !== nothing
+        Base.print(io, " to function ")
+        Base.printstyled(io, dispatch.fname, bold=true)
+    end
     if length(dispatch.backtrace) == 0
-        if VERSION >= v"1.10-beta3"
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
-        else
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
-        end
         # TODO: Even when backtrace fails, we should report at least 1 stack frame
-        Base.println(io, " in unknown location")
+        Base.println(io," in unknown location")
     else
-        if VERSION >= v"1.10-beta3"
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
-        else
-            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
-        end
-        Base.println(io, " in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
+        Base.println(io," in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
         show_backtrace_and_excerpt(io, dispatch.backtrace)
     end
 end

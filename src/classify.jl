@@ -33,6 +33,27 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
 
 end
 
+const generic_method_offsets = Dict{String,Int}(("jl_f__apply_latest" => 2, "ijl_f__apply_latest" => 2,
+    "jl_f__call_latest" => 2, "ijl_f__call_latest" => 2, "jl_f_invoke" => 2, "jl_invoke" => 1,
+    "jl_apply_generic" => 1, "ijl_f_invoke" => 2, "ijl_invoke" => 1, "ijl_apply_generic" => 1))
+
+function resolve_dispatch_target(inst::LLVM.Instruction)
+    @assert isa(inst, LLVM.CallInst)
+    fun = LLVM.called_operand(inst)
+    if isa(fun, LLVM.Function) && in(LLVM.name(fun), keys(generic_method_offsets))
+        offset = generic_method_offsets[LLVM.name(fun)]
+        flib = operands(inst)[offset]
+        flib = unwrap_ptr_casts(flib)
+        flib = look_through_loads(flib)
+        if isa(flib, ConstantInt)
+            rep = reinterpret(Ptr{Cvoid}, convert(Csize_t, flib))
+            flib = Base.unsafe_pointer_to_objref(rep)
+            return flib
+        end
+    end
+    return nothing
+end
+
 function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
     if name in ("egal__unboxed", "lock_value", "unlock_value", "get_nth_field_noalloc",
                 "load_and_lookup", "lazy_load_and_lookup", "box_bool", "box_int8",
