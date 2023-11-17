@@ -45,9 +45,6 @@ function resolve_dispatch_target(inst::LLVM.Instruction)
         flib = operands(inst)[offset]
         flib = unwrap_ptr_casts(flib)
         flib = look_through_loads(flib)
-        while isa(flib, LLVM.ConstantExpr)
-            flib = LLVM.Value(LLVM.LLVM.API.LLVMGetOperand(flib, 0))
-        end
         if isa(flib, ConstantInt)
             rep = reinterpret(Ptr{Cvoid}, convert(Csize_t, flib))
             flib = Base.unsafe_pointer_to_objref(rep)
