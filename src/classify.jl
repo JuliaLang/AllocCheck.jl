@@ -33,16 +33,15 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
 
 end
 
-const generic_method_offsets = Dict{String,Tuple{Int,Int}}(("jl_f__apply_latest" => (2, 3), "ijl_f__apply_latest" => (2, 3),
-    "jl_f__call_latest" => (2, 3), "ijl_f__call_latest" => (2, 3), "jl_f_invoke" => (2, 3), "jl_invoke" => (1, 3),
-    "jl_apply_generic" => (1, 2), "ijl_f_invoke" => (2, 3), "ijl_invoke" => (1, 3), "ijl_apply_generic" => (1, 2)))
+const generic_method_offsets = Dict{String,Int}(("jl_f__apply_latest" => 2, "ijl_f__apply_latest" => 2,
+    "jl_f__call_latest" => 2, "ijl_f__call_latest" => 2, "jl_f_invoke" => 2, "jl_invoke" => 1,
+    "jl_apply_generic" => 1 "ijl_f_invoke" => 2, "ijl_invoke" => 1, "ijl_apply_generic" => 1))
 
-function classify_dispatch(inst::LLVM.Instruction)
+function resolve_dispatch_target(inst::LLVM.Instruction)
     @assert isa(inst, LLVM.CallInst)
     fun = LLVM.called_operand(inst)
     if isa(fun, LLVM.Function) && in(LLVM.name(fun), keys(generic_method_offsets))
-        offset, start = generic_method_offsets[LLVM.name(fun)]
-
+        offset = generic_method_offsets[LLVM.name(fun)]
         flib = operands(inst)[offset]
         flib = unwrap_ptr_casts(flib)
         flib = look_through_loads(flib)

@@ -31,11 +31,7 @@ struct DynamicDispatch
 end
 
 function Base.hash(self::DynamicDispatch, h::UInt)
-    if self.fname === nothing
-        return nice_hash(self.backtrace, h)
-    else
-        return Base.hash(self.fname, nice_hash(self.backtrace, h))
-    end
+    return Base.hash(self.fname, nice_hash(self.backtrace, h))
 end
 
 function Base.:(==)(self::DynamicDispatch, other::DynamicDispatch)
