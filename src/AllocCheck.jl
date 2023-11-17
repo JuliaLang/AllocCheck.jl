@@ -295,7 +295,7 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
 end
 
 """
-    check_allocs(func, types; entry_abi=:specfunc, ret_mod=false)
+    check_allocs(func, types; ignore_throw=true)
 
 Compiles the given function and types to LLVM IR and checks for allocations.
 Returns a vector of `AllocationSite` structs, each containing a `CallInst` and a backtrace.
