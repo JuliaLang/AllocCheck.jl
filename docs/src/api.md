@@ -9,3 +9,7 @@
 ```@docs
 AllocCheck.check_allocs
 ```
+
+```@docs
+AllocCheck.@check_allocs
+```

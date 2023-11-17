@@ -28,6 +28,6 @@ julia> length(check_allocs(sin, (Float64,); ignore_throw=true)) # ignore allocat
 
 #### Limitations
 
- 1. Runtime dispatch
+ Every call into a `@check_allocs` function behaves like a dynamic dispatch. This means that it can trigger compilation dynamically (involving lots of allocation), and even when the function has already been compiled, a small amount of allocation is still expected on function entry.
 
-   Any runtime dispatch is conservatively assumed to allocate.
+ For most applications, the solution is to use `@check_allocs` to wrap your top-level entry point or your main application loop, in which case those applications are only incurred once. `@check_allocs` will guarantee that no dynamic compilation or allocation occurs once your function has started running.

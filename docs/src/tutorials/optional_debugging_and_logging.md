@@ -2,7 +2,8 @@
 
 For debugging purposes, it may sometimes be beneficial to include logging statements in a function, for example
 ```@example DEBUGGING
-function myfun(verbose::Bool)
+using AllocCheck # hide
+@check_allocs function myfun(verbose::Bool)
     a = 0.0
     for i = 1:3
         a = a + i
@@ -12,9 +13,8 @@ end
 nothing # hide
 ```
 Here, the printing of some relevant information is only performed if `verbose = true`. While the printing is optional, and not performed if `verbose = false`, [`check_allocs`](@ref) operates on _types rather than values_, i.e., `check_allocs` only knows that the argument is of type `Bool`, not that it may have the value `false`:
-```@example DEBUGGING
-using AllocCheck
-check_allocs(myfun, (Bool,)) |> length
+```@repl DEBUGGING
+myfun(false)
 ```
 Indeed, this function was determined to potentially allocate memory.
 
@@ -28,7 +28,7 @@ function typed_myfun(::Val{verbose}) where verbose
     end
 end
 
-check_allocs(typed_myfun, (Val{false},)) |> length
+length(check_allocs(typed_myfun, (Val{false},)))
 ```
 
 The compiler, and thus also AllocCheck, now knows that the value of `verbose` is `false`, since this is encoded in the _type_ `Val{false}`. The compiler can use this knowledge to figure out that the `@info` statement won't be executed, and thus prove that the function will not allocate memory.
@@ -40,9 +40,27 @@ typed_myfun(Val{true}())
 
 
 ## Advanced: Constant propagation
-Sometimes, the compiler is able to use _constant propagation_ to determine what path through a program will be taken based on the _value of constants_. We demonstrate this effect below, where the value `verbose = false` is hard-coded
+
+Sometimes, code written without this trick will still work just fine with AllocCheck.
+
+That's because in some limited scenarios, the compiler is able to use _constant propagation_ to determine what path through a program will be taken based on the _value of constants_.
+
+We demonstrate this effect below, where the value `verbose = false` is hard-coded into the function:
 ```@example DEBUGGING
-my_outer_function() = myfun(false) # Hard coded value false
-check_allocs(my_outer_function, ()) |> length
+@check_allocs function constant_myfun()
+    verbose = false
+    a = 0.0
+    for i = 1:3
+        a = a + i
+        verbose && @info "a = $a"
+    end
+    return a
+end
+
+constant_myfun()
 ```
-When looking at `my_outer_function`, the compiler knows that `verbose = false` since this constant is hard coded into the program, and the compiler thus has the same amount of information here as when the value was lifted into the type domain. Constant propagation is considered a performance optimization that the compiler may or may not perform, and it is thus recommended to use the `Val` type to lift values into the type domain to guarantee that the compiler will use this information.
+
+When looking at `constant_myfun`, the compiler knows that `verbose = false` since this constant is hard coded into the program. Sometimes, the compiler can even propagate constant values all the way into called functions.
+
+This is useful, but it's not guaranteed to happen in general. The `Val{T}` trick described here ensures that the variable is propagated as a constant everywhere it is required.
+
