@@ -125,6 +125,13 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
                             push!(errors, AllocationSite(Any, bt))
                         else
                             for (inst_, typ) in allocs
+
+                                throw_only = dominates(postdomtree, throw_, inst_)
+                                ignore_throw && throw_only && continue
+
+                                catch_only = dominates(domtree, catch_, inst_)
+                                ignore_throw && catch_only && continue
+
                                 bt = backtrace_(inst_; compiled)
                                 push!(errors, AllocationSite(typ, bt))
                             end

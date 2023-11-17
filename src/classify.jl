@@ -19,7 +19,7 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
     may_alloc = fn_may_allocate(name; ignore_throw)
     if name in ("alloc_genericmemory", "genericmemory_copy", "array_copy", "alloc_string",
                 "alloc_array_1d", "alloc_array_2d", "alloc_array_3d", "gc_alloc_typed",
-                "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented") || occursin(r"^box_.*", name)
+                "gc_pool_alloc", "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented") || occursin(r"^box_.*", name)
         return (:alloc, may_alloc)
     elseif name in ("f__apply_latest", "f__apply_iterate", "f__apply_pure", "f__call_latest",
                     "f__call_in_world", "f__call_in_world_total", "f_intrinsic_call", "f_invoke",
@@ -88,16 +88,16 @@ function resolve_static_jl_value_t(val::LLVM.Value)
     return Base.unsafe_pointer_to_objref(ptr)
 end
 
-function transitive_uses(val::LLVM.Value; unwrap = (use)->false)
-    uses = LLVM.Use[]
-    for use in uses(val)
+function transitive_uses(inst::LLVM.Instruction; unwrap = (use)->false)
+    uses_ = LLVM.Use[]
+    for use in uses(inst)
         if unwrap(use)
-            append!(uses, transitive_uses(val, unwrap))
+            append!(uses_, transitive_uses(user(use); unwrap))
         else
-            push!(uses, use)
+            push!(uses_, use)
         end
     end
-    return uses
+    return uses_
 end
 
 """
@@ -152,7 +152,7 @@ function resolve_allocations(call::LLVM.Value)
         @assert false # above is exhaustive
     elseif name == "gc_pool_alloc"
         seen = Set()
-        allocs = Tuple{LLVM.Inst, Any}[]
+        allocs = Tuple{LLVM.Instruction, Any}[]
         for calluse in transitive_uses(call; unwrap = (use)->user(use) isa LLVM.BitCastInst)
             gep = user(calluse)
             !isa(gep, LLVM.GetElementPtrInst) && continue
@@ -164,13 +164,13 @@ function resolve_allocations(call::LLVM.Value)
 
             # Now, look for the store into the type tag and count that as our allocation(s)
             for gepuse in uses(gep)
-                store = user(use)
+                store = user(gepuse)
                 !isa(store, LLVM.StoreInst) && continue
 
                 # It is possible for the optimizer to merge multiple distinct `gc_pool_alloc`
                 # allocations which actually have distinct types, so here we count each type
                 # tag store as a separate allocation.
-                type_tag = operands(isstore)[1]
+                type_tag = operands(store)[1]
                 type = resolve_static_jl_value_t(type_tag)
                 if type === nothing
                     type = Any
