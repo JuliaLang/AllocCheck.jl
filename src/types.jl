@@ -39,11 +39,19 @@ end
 
 function Base.show(io::IO, dispatch::DynamicDispatch)
     if length(dispatch.backtrace) == 0
-        Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
+        if VERSION >= v"1.10-beta3"
+            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
+        else
+            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
+        end
         # TODO: Even when backtrace fails, we should report at least 1 stack frame
         Base.println(io, " in unknown location")
     else
-        Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
+        if VERSION >= v"1.10-beta3"
+            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true, italic=true)
+        else
+            Base.printstyled(io, "Dynamic dispatch", color=:red, bold=true)
+        end
         Base.println(io, " in ", dispatch.backtrace[1].file, ":", dispatch.backtrace[1].line)
         show_backtrace_and_excerpt(io, dispatch.backtrace)
     end
