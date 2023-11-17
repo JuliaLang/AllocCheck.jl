@@ -65,12 +65,24 @@ function unwrap_ptr_casts(val::LLVM.Value)
     end
 end
 
+function look_through_loads(val::LLVM.Value)
+    if isa(val, LLVM.LoadInst)
+        val = operands(val)[1]
+        val = unwrap_ptr_casts(val)
+        if isa(val, LLVM.GlobalVariable)
+            val = LLVM.initializer(val)
+            val = unwrap_ptr_casts(val)
+        end
+    end
+    return val
+end
+
 """
 Returns `nothing` if the value could not be resolved statically.
 """
-function resolve_static_jl_value_t(val::LLVM.Value) 
+function resolve_static_jl_value_t(val::LLVM.Value)
     val = unwrap_ptr_casts(val)
-
+    val = look_through_loads(val)
     !isa(val, ConstantInt) && return nothing
     ptr = reinterpret(Ptr{Cvoid}, convert(UInt, val))
     return Base.unsafe_pointer_to_objref(ptr)
