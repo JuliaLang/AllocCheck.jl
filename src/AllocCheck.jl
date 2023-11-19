@@ -205,6 +205,6 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
 end
 
 
-export check_allocs, alloc_type, @check_allocs, AllocCheckFailure
+export check_allocs, alloc_type, @check_allocs, AllocCheckFailure, @check_allocs_call
 
 end
