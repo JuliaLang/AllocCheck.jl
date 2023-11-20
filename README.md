@@ -82,4 +82,4 @@ ERROR: @check_alloc function encountered 2 errors (1 allocations / 1 dynamic dis
 
 Every call into a `@check_allocs` function behaves like a dynamic dispatch. This means that it can trigger compilation dynamically (involving lots of allocation), and even when the function has already been compiled, a small amount of allocation is still expected on the function entry.
 
-For most applications, the solution is to use `@check_allocs` to wrap your top-level entry point or your main application loop, in which case those applications are only incurred once. `@check_allocs` will guarantee that no dynamic compilation or allocation occurs once your function has started running.
+For most applications, the solution is to use `@check_allocs` to wrap your top-level entry point or your main application loop, in which case those allocations are only incurred once. `@check_allocs` will guarantee that no dynamic compilation or allocation occurs once your function has started running.
