@@ -35,7 +35,7 @@ function Base.hash(self::DynamicDispatch, h::UInt)
 end
 
 function Base.:(==)(self::DynamicDispatch, other::DynamicDispatch)
-    return (self.name === other.name) && (nice_isequal(self.backtrace,other.backtrace))
+    return (self.fname === other.fname) && (nice_isequal(self.backtrace,other.backtrace))
 end
 
 function Base.show(io::IO, dispatch::DynamicDispatch)
