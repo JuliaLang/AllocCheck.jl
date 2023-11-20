@@ -10,7 +10,7 @@ LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 
 [compat]
-GPUCompiler = "0.24"
+GPUCompiler = "0.24, 0.25"
 LLVM = "6.3"
 ExprTools = "0.1"
 MacroTools = "0.5"
