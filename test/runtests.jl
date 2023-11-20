@@ -182,6 +182,8 @@ end
 end
 
 @testset "Error types" begin
+
+    # All error types should support Base.show()
     iob = IOBuffer()
     alloc_with_no_bt = AllocCheck.AllocationSite(Float32, Base.StackTraces.StackFrame[])
     show(iob, alloc_with_no_bt)
@@ -214,6 +216,22 @@ end
     dispatch_with_bt_foo = AllocCheck.DynamicDispatch(Base.stacktrace(), :foo)
     show(iob, dispatch_with_bt_foo) === nothing
     @test !occursin("unknown location", String(take!(iob)))
+
+    # All error types should implement the required Base.:(==) and Base.hash for uniquing
+    uniqued = unique([
+        alloc_with_no_bt, alloc_with_bt, call_with_no_bt, call_with_bt,
+        dispatch_with_no_bt_nothing, dispatch_with_bt_nothing,
+        dispatch_with_no_bt_foo, dispatch_with_bt_foo,
+        alloc_with_no_bt, alloc_with_bt, call_with_no_bt, call_with_bt,
+        dispatch_with_no_bt_nothing, dispatch_with_bt_nothing,
+        dispatch_with_no_bt_foo, dispatch_with_bt_foo,
+    ])
+
+    @test uniqued == [
+        alloc_with_no_bt, alloc_with_bt, call_with_no_bt, call_with_bt,
+        dispatch_with_no_bt_nothing, dispatch_with_bt_nothing,
+        dispatch_with_no_bt_foo, dispatch_with_bt_foo,
+    ]
 end
 
 @testset "repeated allocations" begin
