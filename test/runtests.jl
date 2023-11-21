@@ -273,3 +273,8 @@ end
     @test !allunique(allocs)
     @test length(unique(allocs)) == 2
 end
+
+@testset "@test_noalloc" begin
+    @test_noalloc 1 + 1
+    @test_noalloc rand(2, 2) * rand(2, 2) broken=true
+end

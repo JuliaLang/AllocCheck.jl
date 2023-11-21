@@ -215,7 +215,28 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
     return allocs
 end
 
+function _test_noalloc end # Implemented in `ext/TestAlloc.jl`
 
-export check_allocs, alloc_type, @check_allocs, AllocCheckFailure
+"""
+    @test_noalloc f(args...; kwargs...) key=val ...
+
+Test that `f(args...; kwargs...)` does not allocate. If executed inside a
+`@testset`, return a `Pass Result` if no allocations occur, a `Fail Result` if
+there are allocations, and a `Error Result` if any other errors occur during
+evaluation. If executed outside a `@testset` throw an exception instead of
+returning `Fail` or `Error`.
+
+The `broken` and `skip` keys can be set to `true`/`false`, and behave the same
+as in `@test`. The `ignore_throw` key can also be set to `true`/`false`, and is
+passed through to `@check_allocs`.
+"""
+macro test_noalloc(expr, kws...)
+    if length(methods(_test_noalloc)) == 0
+        error("@test_noalloc is an extension to Test, but Test is not loaded.")
+    end
+    _test_noalloc(__module__, __source__, expr, kws...)
+end
+
+export check_allocs, alloc_type, @check_allocs, AllocCheckFailure, @test_noalloc
 
 end
