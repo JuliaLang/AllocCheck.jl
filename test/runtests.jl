@@ -141,6 +141,11 @@ end
     @test mysum2(x, y) == x + y
     @check_allocs (x::Bar)(y::Bar) = x.val + y.val
     @test Bar(x)(Bar(y)) == x + y
+
+    # Callsite forms
+    @test 1 + x == @check_allocs 1 + x
+    @test x^2 == @check_allocs (a -> a^2)(x)
+    @test_throws AllocCheck.AllocCheckFailure @check_allocs same_ccall()
 end
 
 
