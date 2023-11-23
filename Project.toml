@@ -9,6 +9,12 @@ GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
 LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 
+[weakdeps]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[extensions]
+TestAlloc = "Test"
+
 [compat]
 GPUCompiler = "0.24, 0.25"
 LLVM = "6.3"
