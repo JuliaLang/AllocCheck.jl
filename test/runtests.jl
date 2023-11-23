@@ -161,17 +161,35 @@ end
     @test alloc_on_throw2(false) === 1.5
 end
 
-if VERSION > v"1.11.0-DEV.753"
 memory_alloc() = Memory{Int}(undef, 10)
-end
 
 @testset "Types of Allocations" begin
     if VERSION > v"1.11.0-DEV.753"
-        @test any(x.type == Memory{Int} for x in check_allocs(memory_alloc, (); ignore_throw = false))
-        @test any(x.type == Memory for x in check_allocs(()->copy(Memory{Int}(undef, 10)),()))
+        @test  any(x isa AllocCheck.AllocationSite && x.type == Memory{Int}
+                   for x in check_allocs(memory_alloc, (); ignore_throw = false))
 
-        # TODO: Add support jl_genericmemory_copy_slice
-        # @test any(x.type == Memory for x in check_allocs((x)->copy(x),(Vector{Int}),))
+        @test  any(x isa AllocCheck.AllocationSite && x.type == Memory
+                   for x in check_allocs(()->copy(Memory{Int}(undef, 10)),()))
+
+        @test  any(x isa AllocCheck.AllocationSite && x.type == Memory
+                   for x in check_allocs((x)->copy(x),(Vector{Int},)))
+
+        @test  any(x isa AllocCheck.AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
+                   for x in check_allocs(copyto!, (Memory{Int}, Int, Memory{Int}, Int); ignore_throw = false))
+
+        @test !any(x isa AllocCheck.AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
+                   for x in check_allocs(copyto!, (Memory{Int}, Int, Memory{Int}, Int); ignore_throw = true))
+
+        @test  all(x isa AllocCheck.AllocationSite && x.type == Memory{Int}
+                   for x in check_allocs(Base.array_new_memory, (Memory{Int}, Int)))
+
+        @test  all(x isa AllocCheck.AllocationSite && x.type == Memory{UInt8} # uses jl_string_to_genericmemory
+                   for x in check_allocs(Base.array_new_memory, (Memory{UInt8}, Int)))
+
+        @test  all(x isa AllocCheck.AllocationSite && x.type == Memory        # uses jl_ptr_to_genericmemory
+                   for x in check_allocs(Base.unsafe_wrap, (Type{Memory{Int}}, Ptr{Int}, Int)))
+
+        @test length(check_allocs(Base.mightalias, (Memory{Int},Memory{Int}))) == 0 # uses jl_genericmemory_owner (intercepted)
     end
 
     @test any(alloc.type == Base.RefValue{Int} for alloc in check_allocs(()->Ref{Int}(), ()))

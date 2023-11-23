@@ -17,9 +17,11 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
     name = match_[2]
 
     may_alloc = fn_may_allocate(name; ignore_throw)
-    if name in ("alloc_genericmemory", "genericmemory_copy", "array_copy", "alloc_string",
+    if name in ("alloc_genericmemory", "genericmemory_copy", "genericmemory_copy_slice",
+                "string_to_genericmemory", "ptr_to_genericmemory", "array_copy", "alloc_string",
                 "alloc_array_1d", "alloc_array_2d", "alloc_array_3d", "gc_alloc_typed",
-                "gc_pool_alloc", "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented") || occursin(r"^box_.*", name)
+                "gc_pool_alloc", "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented"
+               ) || occursin(r"^box_.*", name)
         return (:alloc, may_alloc)
     elseif name in ("f__apply_latest", "f__apply_iterate", "f__apply_pure", "f__call_latest",
                     "f__call_in_world", "f__call_in_world_total", "f_intrinsic_call", "f_invoke",
@@ -60,9 +62,10 @@ function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
                 "box_uint8", "excstack_state", "restore_excstack", "enter_handler",
                 "pop_handler", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
                 "gc_disable_finalizers_internal", "gc_is_in_finalizer", "enable_gc_logging",
-                "gc_safepoint", "gc_collect") || occursin(r"^unbox_.*", name)
+                "gc_safepoint", "gc_collect", "genericmemory_owner") || occursin(r"^unbox_.*", name)
         return false # these functions never allocate
-    elseif name in ("f_ifelse", "f_typeassert", "f_is", "f_throw", "f__svec_ref")
+    elseif name in ("f_ifelse", "f_typeassert", "f_is", "f_throw", "f__svec_ref",
+                    "genericmemory_copyto")
         return ignore_throw == false # these functions only allocate if they throw
     else
         return true
@@ -146,9 +149,12 @@ function resolve_allocations(call::LLVM.Value)
         return [(call, String)]
     elseif name == "array_copy"
         return [(call, Array)]
-    elseif name == "genericmemory_copy"
+    elseif name in ("genericmemory_copy", "genericmemory_copy_slice", "ptr_to_genericmemory")
         @assert VERSION > v"1.11.0-DEV.753"
         return [(call, Memory)]
+    elseif name == "string_to_genericmemory"
+        @assert VERSION > v"1.11.0-DEV.753"
+        return [(call, Memory{UInt8})]
     elseif name == "alloc_genericmemory"
         type = resolve_static_jl_value_t(operands(call)[1])
         return [(call, type !== nothing ? type : Memory)]
