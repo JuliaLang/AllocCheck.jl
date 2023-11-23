@@ -1,4 +1,5 @@
 using AllocCheck
+using AllocCheck: AllocatingRuntimeCall, DynamicDispatch, AllocationSite
 using Test
 
 mutable struct Foo{T}
@@ -93,6 +94,10 @@ end
     @test my_mod4(x, y) == y * y
     @test Bar(x)(y) == mod(x, y)
 
+    struct Baz
+        val::Float64
+    end
+
     # Standard function syntax (w/ kwargs)
     @check_allocs function my_mod5(; offset=1.0)
         return 2 * offset
@@ -103,10 +108,10 @@ end
     @check_allocs function my_mod7(x::Float64, y; offset)
         return mod(x, y) + offset
     end
-    @check_allocs function (x::Bar)(y::Float64; a, b)
+    @check_allocs function (x::Baz)(y::Float64; a, b)
         return mod(x.val, y) + a + b
     end
-    @check_allocs function (x::Bar)(y::Float32; a, b=1.0)
+    @check_allocs function (x::Baz)(y::Float32; a, b=1.0)
         return mod(x.val, y) + a + b
     end
 
@@ -117,10 +122,10 @@ end
     @test my_mod6(x, y; offset) == mod(x, y) + offset
     @test my_mod6(x, y) == mod(x, y) + 1.0
     @test my_mod7(x, y; offset) == mod(x, y) + offset
-    @test Bar(x)(y; a, b) == mod(x, y) + a + b
-    @test Bar(x)(y; b, a) == mod(x, y) + a + b
-    @test Bar(x)(Float32(y); b, a) == mod(x, Float32(y)) + a + b
-    @test Bar(x)(Float32(y); a) == mod(x, Float32(y)) + a + 1.0
+    @test Baz(x)(y; a, b) == mod(x, y) + a + b
+    @test Baz(x)(y; b, a) == mod(x, y) + a + b
+    @test Baz(x)(Float32(y); b, a) == mod(x, Float32(y)) + a + b
+    @test Baz(x)(Float32(y); a) == mod(x, Float32(y)) + a + 1.0
 
     # (x,y) -> x*y
     f0 = @check_allocs () -> 1.5
@@ -139,8 +144,8 @@ end
     @test mysum1(x, y) == x + y
     @check_allocs mysum2(x::Float64, y::Float64) = x + y
     @test mysum2(x, y) == x + y
-    @check_allocs (x::Bar)(y::Bar) = x.val + y.val
-    @test Bar(x)(Bar(y)) == x + y
+    @check_allocs (x::Baz)(y::Baz) = x.val + y.val
+    @test Baz(x)(Baz(y)) == x + y
 end
 
 
@@ -161,32 +166,30 @@ end
     @test alloc_on_throw2(false) === 1.5
 end
 
-memory_alloc() = Memory{Int}(undef, 10)
-
 @testset "Types of Allocations" begin
     if VERSION > v"1.11.0-DEV.753"
-        @test  any(x isa AllocCheck.AllocationSite && x.type == Memory{Int}
-                   for x in check_allocs(memory_alloc, (); ignore_throw = false))
-
-        @test  any(x isa AllocCheck.AllocationSite && x.type == Memory
-                   for x in check_allocs(()->copy(Memory{Int}(undef, 10)),()))
-
-        @test  any(x isa AllocCheck.AllocationSite && x.type == Memory
-                   for x in check_allocs((x)->copy(x),(Vector{Int},)))
-
-        @test  any(x isa AllocCheck.AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
+        @test  any(x isa AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
                    for x in check_allocs(copyto!, (Memory{Int}, Int, Memory{Int}, Int); ignore_throw = false))
 
-        @test !any(x isa AllocCheck.AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
+        @test !any(x isa AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
                    for x in check_allocs(copyto!, (Memory{Int}, Int, Memory{Int}, Int); ignore_throw = true))
 
-        @test  all(x isa AllocCheck.AllocationSite && x.type == Memory{Int}
-                   for x in check_allocs(Base.array_new_memory, (Memory{Int}, Int)))
+        @test  all(x isa AllocationSite && x.type == Memory{Int}   # uses jl_alloc_genericmemory
+                   for x in check_allocs(Memory{Int}, (typeof(undef), Int); ignore_throw = false))
 
-        @test  all(x isa AllocCheck.AllocationSite && x.type == Memory{UInt8} # uses jl_string_to_genericmemory
+        @test  any(x isa AllocationSite && x.type == Memory        # uses jl_genericmemory_copy
+                   for x in check_allocs(copy, (Memory{Int},)))
+
+        @test  any(x isa AllocationSite && x.type == Memory        # uses jl_genericmemory_copy_slice
+                   for x in check_allocs(copy, (Vector{Int},)))
+
+        @test  all(x isa AllocationSite && x.type == Memory{UInt8} # uses jl_string_to_genericmemory
                    for x in check_allocs(Base.array_new_memory, (Memory{UInt8}, Int)))
 
-        @test  all(x isa AllocCheck.AllocationSite && x.type == Memory        # uses jl_ptr_to_genericmemory
+        @test  all(x isa AllocationSite && x.type == Memory{Int}   # uses jl_alloc_genericmemory
+                   for x in check_allocs(Base.array_new_memory, (Memory{Int}, Int)))
+
+        @test  all(x isa AllocationSite && x.type == Memory        # uses jl_ptr_to_genericmemory
                    for x in check_allocs(Base.unsafe_wrap, (Type{Memory{Int}}, Ptr{Int}, Int)))
 
         @test length(check_allocs(Base.mightalias, (Memory{Int},Memory{Int}))) == 0 # uses jl_genericmemory_owner (intercepted)
@@ -203,35 +206,35 @@ end
 
     # All error types should support Base.show()
     iob = IOBuffer()
-    alloc_with_no_bt = AllocCheck.AllocationSite(Float32, Base.StackTraces.StackFrame[])
+    alloc_with_no_bt = AllocationSite(Float32, Base.StackTraces.StackFrame[])
     show(iob, alloc_with_no_bt)
     @test occursin("unknown location", String(take!(iob)))
 
-    alloc_with_bt = AllocCheck.AllocationSite(Float32, Base.stacktrace())
+    alloc_with_bt = AllocationSite(Float32, Base.stacktrace())
     show(iob, alloc_with_bt) === nothing
     @test !occursin("unknown location", String(take!(iob)))
 
-    call_with_no_bt = AllocCheck.AllocatingRuntimeCall("jl_subtype", Base.StackTraces.StackFrame[])
+    call_with_no_bt = AllocatingRuntimeCall("jl_subtype", Base.StackTraces.StackFrame[])
     show(iob, call_with_no_bt)
     @test occursin("unknown location", String(take!(iob)))
 
-    call_with_bt = AllocCheck.AllocatingRuntimeCall("jl_subtype", Base.stacktrace())
+    call_with_bt = AllocatingRuntimeCall("jl_subtype", Base.stacktrace())
     show(iob, call_with_bt) === nothing
     @test !occursin("unknown location", String(take!(iob)))
 
-    dispatch_with_no_bt_nothing = AllocCheck.DynamicDispatch(Base.StackTraces.StackFrame[], nothing)
+    dispatch_with_no_bt_nothing = DynamicDispatch(Base.StackTraces.StackFrame[], nothing)
     show(iob, dispatch_with_no_bt_nothing)
     @test occursin("unknown location", String(take!(iob)))
 
-    dispatch_with_no_bt_foo = AllocCheck.DynamicDispatch(Base.StackTraces.StackFrame[], :foo)
+    dispatch_with_no_bt_foo = DynamicDispatch(Base.StackTraces.StackFrame[], :foo)
     show(iob, dispatch_with_no_bt_foo)
     @test occursin("to function foo", String(take!(iob)))
 
-    dispatch_with_bt_nothing = AllocCheck.DynamicDispatch(Base.stacktrace(), nothing)
+    dispatch_with_bt_nothing = DynamicDispatch(Base.stacktrace(), nothing)
     show(iob, dispatch_with_bt_nothing) === nothing
     @test !occursin("unknown location", String(take!(iob)))
 
-    dispatch_with_bt_foo = AllocCheck.DynamicDispatch(Base.stacktrace(), :foo)
+    dispatch_with_bt_foo = DynamicDispatch(Base.stacktrace(), :foo)
     show(iob, dispatch_with_bt_foo) === nothing
     @test !occursin("unknown location", String(take!(iob)))
 
