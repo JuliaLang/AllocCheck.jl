@@ -2,6 +2,7 @@ using ExprTools: splitdef, combinedef
 using MacroTools: splitarg, combinearg
 
 _is_func_def(ex) = Meta.isexpr(ex, :function) || Base.is_short_function_def(ex) || Meta.isexpr(ex, :->)
+_is_call(ex) = Meta.isexpr(ex, :call)
 
 function extract_keywords(ex0)
     kws = Dict{Symbol, Any}()
@@ -152,5 +153,31 @@ function _check_allocs_macro(ex::Expr, mod::Module, source::LineNumberNode; igno
     return quote
         local $f_sym = $(esc(original_fn))
         $(wrapper_fn)
+    end
+end
+
+"""
+    @check_allocs_call ignore_throw=true (function call)
+
+Calls `check_allocs(func, types; ignore_throw)` where `types` is a tuple of the types of the arguments
+passed to `func` in the function call expression that `@check_allocs_call` is applied to.
+For example, `@check_allocs_call 1 + 2.0` is equivalent to `check_allocs(+, (Int, Float64))`.
+"""
+macro check_allocs_call(ex...)
+    kws, body = extract_keywords(ex)
+    if _is_call(body)
+        return _check_allocs_call_macro(body, __module__, __source__; kws...)
+    else
+        error("@check_allocs_call used on something other than a function call")
+    end
+end
+
+function _check_allocs_call_macro(ex::Expr, mod::Module, source::LineNumberNode; ignore_throw=true)
+    func = ex.args[1]
+    args = ex.args[2:end]
+
+    quote
+        types = map(typeof, ($(esc.(args)...),))
+        check_allocs($(esc(func)), types; ignore_throw = $ignore_throw)
     end
 end
