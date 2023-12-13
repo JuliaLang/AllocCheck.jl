@@ -294,3 +294,16 @@ end
     @test !allunique(allocs)
     @test length(unique(allocs)) == 2
 end
+
+"""
+Documentation for `issue64`.
+"""
+@check_allocs function issue64(v::AbstractVector, i, j)
+  v[i], v[j] = v[j], v[i]
+  v
+end
+let io = IOBuffer()
+    print(io, @doc issue64)
+    s = String(take!(io))
+    @test occursin("Documentation for `issue64`.", s)
+end
