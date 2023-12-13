@@ -1,8 +1,6 @@
 using ExprTools: splitdef, combinedef
 using MacroTools: splitarg, combinearg
 
-_is_func_def(ex) = Meta.isexpr(ex, :function) || Base.is_short_function_def(ex) || Meta.isexpr(ex, :->)
-
 function extract_keywords(ex0)
     kws = Dict{Symbol, Any}()
     arg = ex0[end]
@@ -58,7 +56,7 @@ Stacktrace:
 """
 macro check_allocs(ex...)
     kws, body = extract_keywords(ex)
-    if _is_func_def(body)
+    if Base.is_function_def(body)
         return _check_allocs_macro(body, __module__, __source__; kws...)
     else
         error("@check_allocs used on something other than a function definition")
@@ -151,6 +149,6 @@ function _check_allocs_macro(ex::Expr, mod::Module, source::LineNumberNode; igno
     wrapper_fn = combinedef(def)
     return quote
         local $f_sym = $(esc(original_fn))
-        $(wrapper_fn)
+        Base.@__doc__ $(wrapper_fn)
     end
 end
