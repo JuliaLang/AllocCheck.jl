@@ -128,7 +128,7 @@ function Base.show(io::IO, failure::AllocCheckFailure)
     allocs = count(err isa AllocationSite || err isa AllocatingRuntimeCall for err in failure.errors)
     dispatches = count(err isa DynamicDispatch for err in failure.errors)
 
-    Base.print(io, "@check_alloc function encountered ")
+    Base.print(io, "@check_allocs function encountered ")
     Base.printstyled(io, length(failure.errors), color=:red, bold=true)
     Base.print(io, " errors ($(allocs) allocations / $(dispatches) dynamic dispatches).")
 end

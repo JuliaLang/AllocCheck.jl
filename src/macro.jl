@@ -43,7 +43,7 @@ julia> multiply(1.5, 3.5) # no allocations for Float64
 5.25
 
 julia> multiply(rand(3,3), rand(3,3)) # matmul needs to allocate the result
-ERROR: @check_alloc function contains 1 allocations.
+ERROR: @check_allocs function contains 1 allocations.
 
 Stacktrace:
  [1] macro expansion

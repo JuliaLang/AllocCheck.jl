@@ -155,6 +155,6 @@ function (f::CompileResult{Success, F, TT, RT})(args...) where {Success, F, TT, 
     if Success
         return abi_call(f.f_ptr, RT, TT, f.func, args...)
     else
-        error("@check_alloc function contains ", length(f.analysis), " allocations.")
+        error("@check_allocs function contains ", length(f.analysis), " allocations.")
     end
 end
