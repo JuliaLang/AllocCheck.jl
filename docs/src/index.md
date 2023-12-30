@@ -6,7 +6,13 @@ AllocCheck operates on _functions_, trying to statically determine wether or not
 
 ## Getting started
 
-The primary entry point to check allocations is the macro [`@check_allocs`](@ref) which is used to annotate a function definition that you'd like to enforce allocation checks for:
+AllocCheck has two primary entry points
+- [`check_allocs`](@ref)
+- [`@check_allocs`](@ref)
+
+The difference between them is subtle, but important in situations where you want to absolutely guarantee that the result of the static analysis holds at runtime.
+
+Starting with **the macro** [`@check_allocs`](@ref), this is used to annotate a function definition that you'd like to enforce allocation checks for:
 ```@repl README
 using AllocCheck
 using Test # hide
@@ -37,6 +43,39 @@ end
 
 we see what type of object was allocated, and where in the code the allocation appeared.
 
+The **function** [`check_allocs`](@ref) is similar to the macro, but instead of passing or throwing an error, returns an array of informative objects indicating any presence of allocations, runtime dispatches, or allocating runtime calls:
+
+```@example README
+results = check_allocs(\, (Matrix{Float64}, Vector{Float64}))
+length(results)
+```
+This called returned a long array of results, indicating that there are several potential allocations or runtime dispatches resulting form a function call with the specified signature. We have a look at how one of these elements look:
+
+```@example README
+results[1]
+```
+
+## The difference between `check_allocs` and `@check_allocs`
+The function [`check_allocs`](@ref) performs analysis of a function call with the type signature specified in a very particular context, the state of the julia session at the time of the call to `check_allocs`. Code loaded after this analysis may invalidate the analysis, and any analysis performed in, for example, a test suite, may be invalid at runtime. Less obvious problems may appears as a result of the type-inference stage in the Julia compiler sometimes being sensitive to the order of code loading, making it possible for the inference result to differ between two subtly different Julia sessions. 
+
+The macro [`@check_allocs`](@ref) on the other hand, performs the analysis _immediately prior_ to the execution of the analyzed function call, ensuring the validity of the analysis at the time of the call.
+
+In safety-critical scenarios, this difference may be important, while in more casual scenarios, the difference may be safely ignored and whichever entry point is more convenient may be used.
+
+### An example of invalidated analysis
+
+In the example below we define a function and perform an analysis on it which indicates on issues. We then load additional code (which may be done by loading, e.g., a package) and perform the analysis again, which now indicates that issues have appeared.
+
+```@example README
+my_add(x, y) = x + y
+check_allocs(my_add, (Int, Int))
+```
+As expected, no allocations are indicated. We now load additional code by defining a new method for this function
+```@example README
+my_add(x::Int, y) = BigInt(x) + y
+length(check_allocs(my_add, (Int, Int)))
+```
+This time, several potential allocations are indicated. In this example, a method that was more specific for the analyzed signature was added, and this method may allocate memory.
 
 ### Functions that throw exceptions
 
