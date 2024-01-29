@@ -69,6 +69,21 @@ using LLVM: LLVMType
                 rettype = Nothing
                 after = :(sret[])
             end
+        elseif isa(rettype, Union)
+            union_info = union_layout_info(rettype)
+            if union_info.sz_bytes > 0
+                # "Small" union
+
+                # This is supposed to alloca the appropriate amount of bytes and then expect a
+                # struct { jl_value_t*, uint8_t (selector) }
+            elseif union_info.all_unbox
+                # Ghost - all_unbox + 0-size
+
+                # This just receives a RT of uint8_t (selector)
+            else
+                rettype_is_ctype = ccall(:jl_type_mappable_to_c, Cint, (Any,), rettype) != 0
+                !rettype_is_ctype && (rettype = Any;)
+            end
         else
             # rt = T_prjlvalue
         end
@@ -79,4 +94,60 @@ using LLVM: LLVMType
         ret = ccall(f, $rettype, ($(ccall_types...),), $(argexprs...))
         $after
     end
+end
+
+# Based on `for_each_uniontype_small` in src/cgutils.cpp
+function foreach_union_type_small(f::Function, @nospecialize(T)::Type, counter::Ref{Int})
+    if counter[] > 127
+        return false
+    end
+    if T isa Union
+        all_unbox = foreach_union_type_small(f, T.a, counter)
+        return all_unbox && foreach_union_type_small(f, T.b, counter)
+    end
+    if GPUCompiler.is_pointerfree(T)
+        counter[] += 1
+        f(counter[], T)
+        return true
+    end
+    return false
+end
+
+is_layout_opaque(layout) = layout.nfields == 0 && (layout.npointers > 0)
+function datatype_layout(@nospecialize(T)::Type)
+    if is_layout_opaque(T.layout)
+        T = Base.unwrap_unionall(T.name.wrapper)
+    end
+    return T.layout
+end
+
+struct LayoutInfo
+    sz_bytes::UInt32
+    align::UInt16
+    min_align::UInt16
+    all_unbox::Bool
+end
+
+# Based on `union_alloc_type` in src/cgutils.cpp
+function union_layout_info(@nospecialize(T)::Type{<:Union})
+    nbytes = 0
+    align = 0
+    min_align = typemax(Int)
+    counter = Ref{Int}(0)
+    all_unbox = foreach_union_type_small(
+        (idx::Int, @nospecialize(T)::Type)->begin
+            if !Base.issingletontype(T)
+                layout = datatype_layout(T)
+                if layout.size > nbytes
+                    nbytes = layout.size
+                end
+                if layout.align > align
+                    align = layout.align
+                end
+                if layout.align < min_align
+                    min_align = layout.align
+                end
+            end
+        end, T, counter)
+    return LayoutInfo(nbytes, align, min_align, all_unbox)
 end
