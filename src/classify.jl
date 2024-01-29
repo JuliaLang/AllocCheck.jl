@@ -27,7 +27,7 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
                     "f__call_in_world", "f__call_in_world_total", "f_intrinsic_call", "f_invoke",
                     "f_opaque_closure_call", "apply", "apply_generic", "gf_invoke",
                     "gf_invoke_by_method", "gf_invoke_lookup_worlds", "invoke", "invoke_api",
-                    "jl_call", "jl_call0", "jl_call1", "jl_call2", "jl_call3")
+                    "call", "call0", "call1", "call2", "call3", "unknown_fptr")
         return (:dispatch, may_alloc)
     else
         return (:runtime, may_alloc)
@@ -37,13 +37,15 @@ end
 
 const generic_method_offsets = Dict{String,Int}(("jl_f__apply_latest" => 2, "ijl_f__apply_latest" => 2,
     "jl_f__call_latest" => 2, "ijl_f__call_latest" => 2, "jl_f_invoke" => 2, "jl_invoke" => 1,
-    "jl_apply_generic" => 1, "ijl_f_invoke" => 2, "ijl_invoke" => 1, "ijl_apply_generic" => 1))
+    "jl_apply_generic" => 1, "ijl_f_invoke" => 2, "ijl_invoke" => 1, "ijl_apply_generic" => 1,
+    "jl_unknown_fptr" => 0, "ijl_unknown_fptr" => 0))
 
 function resolve_dispatch_target(inst::LLVM.Instruction)
     @assert isa(inst, LLVM.CallInst)
     fun = LLVM.called_operand(inst)
     if isa(fun, LLVM.Function) && in(LLVM.name(fun), keys(generic_method_offsets))
         offset = generic_method_offsets[LLVM.name(fun)]
+        offset == 0 && return nothing
         flib = operands(inst)[offset]
         flib = unwrap_ptr_casts(flib)
         flib = look_through_loads(flib)
@@ -241,8 +243,16 @@ function rename_call!(call::LLVM.CallInst, mod::LLVM.Module)
         fn, file, line, linfo, fromC, inlined = last(frames)
 
         fname = string(fn)
+    elseif isa(callee, InlineAsm)
+        return # these are emitted for GC operations
+    elseif isa(callee, LLVM.Function)
+        return # function is already compile-time-known and expanded
     else
-        return
+        # Call to a runtime-determined function pointer, usually an OpaqueClosure
+        # or a ccall that we were not able to fully resolve.
+        #
+        # We label this as a DynamicDispatch to an unknown function target.
+        fname = "jl_unknown_fptr"
     end
 
     # Re-write function call to use a locally-created version with a nice name

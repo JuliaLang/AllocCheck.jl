@@ -37,6 +37,15 @@ function run_gc_explicitly()
     GC.gc()
 end
 
+function call_jl_call(x::Int, y::Int)
+    return ccall(:jl_call2, Any, (#= Function =# Any, Any, Any), +, x, y)
+end
+
+const f = Base.Experimental.@opaque (x::Int, y::Int) -> x + y
+function call_opaque_closure(x::Int, y::Int)
+    return f(x, y)
+end
+
 @testset "Number of Allocations" begin
     @test length(check_allocs(mod, (Float64,Float64); ignore_throw=false)) == 0
     @test length(check_allocs(sin, (Float64,); ignore_throw=false)) > 0
@@ -58,6 +67,15 @@ end
     @test length(check_allocs(run_gc_explicitly, (); ignore_throw = false)) == 0
 
     @test_throws MethodError check_allocs(sin, (String,); ignore_throw=false)
+
+    allocs = check_allocs(call_jl_call, (Int, Int); ignore_throw = false)
+    @test length(allocs) == 2
+    @test all((alloc isa AllocationSite && allocs[1].type === Int64) ||
+              (alloc isa DynamicDispatch && allocs[2].fname === nothing)
+              for alloc in allocs)
+
+    allocs = check_allocs(call_opaque_closure, (Int, Int); ignore_throw = false)
+    @test length(allocs) > 0 && any(alloc isa DynamicDispatch for alloc in allocs)
 end
 
 @testset "@check_allocs macro (syntax)" begin
@@ -183,8 +201,15 @@ end
         @test  any(x isa AllocationSite && x.type == Memory        # uses jl_genericmemory_copy_slice
                    for x in check_allocs(copy, (Vector{Int},)))
 
-        @test  all(x isa AllocationSite && x.type == Memory{UInt8} # uses jl_string_to_genericmemory
+        @test  all(x isa DynamicDispatch || (x isa AllocationSite && x.type == Memory{UInt8}) # uses jl_string_to_genericmemory
                    for x in check_allocs(Base.array_new_memory, (Memory{UInt8}, Int)))
+
+        # Marked broken because the `Expr(:foreigncall, QuoteNode(:jl_alloc_string), ...)` should be resolved
+        # by AllocCheck.jl, but is instead (conservatively) marked as a DynamicDisaptch.
+        #
+        # We get thrown off by the `jl_load_and_lookup` machinery here.
+        @test_broken all(x isa AllocationSite && x.type == Memory{UInt8} # uses jl_string_to_genericmemory
+                         for x in check_allocs(Base.array_new_memory, (Memory{UInt8}, Int)))
 
         @test  all(x isa AllocationSite && x.type == Memory{Int}   # uses jl_alloc_genericmemory
                    for x in check_allocs(Base.array_new_memory, (Memory{Int}, Int)))
