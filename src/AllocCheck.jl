@@ -1,6 +1,7 @@
 module AllocCheck
 
 import LLVM, GPUCompiler
+using Core.Compiler: IRCode, CodeInfo, MethodInstance
 using GPUCompiler: JuliaContext, safe_name
 using LLVM: BasicBlock, ConstantExpr, ConstantInt, InlineAsm, IRBuilder, UndefValue,
             blocks, br!, called_operand, dispose, dominates, instructions, metadata,
@@ -164,6 +165,80 @@ function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
 
     unique!(errors)
     return errors
+end
+
+function compute_ir_rettype(ir::IRCode)
+    rt = Union{}
+    for i = 1:length(ir.stmts)
+        stmt = ir.stmts[i][:inst]
+        if isa(stmt, Core.Compiler.ReturnNode) && isdefined(stmt, :val)
+            rt = Core.Compiler.tmerge(Core.Compiler.argextype(stmt.val, ir), rt)
+        end
+    end
+    return Core.Compiler.widenconst(rt)
+end
+
+# NOTE: `argtypes` are taken from the `ir`
+#       `env` is the closure environment
+function check_allocs(ir::IRCode, @nospecialize env...; ignore_throw=true)
+    @assert ir.argtypes[1] === typeof(env)
+
+    ir = Core.Compiler.copy(ir)
+    argtypes = [Core.Compiler.widenconst(type_) for type_ in ir.argtypes[2:end]]
+    rt = compute_ir_rettype(ir)
+    src = ccall(:jl_new_code_info_uninit, Ref{CodeInfo}, ())
+    src.slotnames = Base.fill(:none, length(ir.argtypes))
+    src.slotflags = Base.fill(zero(UInt8), length(ir.argtypes))
+    src.slottypes = copy(ir.argtypes)
+    src.rettype = rt
+    src = Core.Compiler.ir_to_codeinf!(src, ir)
+    # config = compiler_config
+
+    # create a method (like `jl_make_opaque_closure_method`)
+    meth = ccall(:jl_new_method_uninit, Ref{Method}, (Any,), Main)
+    meth.sig = Tuple
+    meth.isva = false
+    meth.is_for_opaque_closure = 0  # XXX: do we want this?
+    meth.name = Symbol("opaque gpu closure")
+    meth.nargs = length(ir.argtypes)
+    meth.file = Symbol()
+    meth.line = 0
+    ccall(:jl_method_set_source, Nothing, (Any, Any), meth, src)
+
+    world = GPUCompiler.tls_world_age()
+    meth.primary_world = world
+    meth.deleted_world = world
+
+    # look up a method instance
+    full_sig = Tuple{typeof(env), argtypes...}
+    mi = ccall(:jl_specializations_get_linfo, Ref{MethodInstance},
+               (Any, Any, Any), meth, full_sig, Core.svec())
+
+    @assert src isa Core.CodeInfo
+
+    # create a code instance
+    ci = ccall(:jl_new_codeinst, Any,
+               (Any, Any, Any, Ptr{Cvoid}, Any, Int32, UInt, UInt, UInt32, UInt32, Any, UInt8),
+               mi, rt, Any, C_NULL, src, 0, world, world, 0, 0, nothing, 0)
+
+    # create a job
+    job = CompilerJob(mi, config, world)
+
+    # smuggle code instance into the job cache
+    cache = GPUCompiler.ci_cache(job)
+    wvc = Core.Compiler.WorldView(cache, world, world)
+    Core.Compiler.setindex!(wvc, ci, job.source)
+
+    allocs = JuliaContext() do ctx
+        mod, meta = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
+        optimize!(job, mod)
+
+        allocs = find_allocs!(mod, meta; ignore_throw)
+        # display(mod)
+        # dispose(mod)
+        allocs
+    end
+    return allocs
 end
 
 """
