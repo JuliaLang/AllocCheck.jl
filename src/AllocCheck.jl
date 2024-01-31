@@ -2,9 +2,9 @@ module AllocCheck
 
 import LLVM, GPUCompiler
 using GPUCompiler: JuliaContext, safe_name
-using LLVM: BasicBlock, ConstantExpr, ConstantInt, IRBuilder, UndefValue, blocks, br!,
-            called_operand, dispose, dominates, instructions, metadata, name, opcode,
-            operands, position!, ret!, successors, switch!, uses, user
+using LLVM: BasicBlock, ConstantExpr, ConstantInt, InlineAsm, IRBuilder, UndefValue,
+            blocks, br!, called_operand, dispose, dominates, instructions, metadata,
+            name, opcode, operands, position!, ret!, successors, switch!, uses, user
 
 include("static_backtrace.jl")
 include("abi_call.jl")
