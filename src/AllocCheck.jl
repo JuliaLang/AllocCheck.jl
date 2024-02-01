@@ -202,7 +202,7 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
     end
     source = GPUCompiler.methodinstance(Base._stable_typeof(func), Base.to_tuple_type(types))
     target = DefaultCompilerTarget()
-    job = CompilerJob(source, config)
+    job = CompilerJob(source, specsig_config)
     allocs = JuliaContext() do ctx
         mod, meta = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
         optimize!(job, mod)
