@@ -79,12 +79,14 @@ function optimize!(@nospecialize(job::CompilerJob), mod::LLVM.Module)
         @dispose pb = LLVM.PassBuilder(tm) begin
             @dispose mpm = LLVM.NewPMModulePassManager(pb) begin
                 build_newpm_pipeline!(pb, mpm)
+                LLVM.add!(mpm, LLVM.GlobalOptPass())
                 run!(mpm, mod, tm)
             end
         end
     else
         @dispose pm=LLVM.ModulePassManager() begin
             build_oldpm_pipeline!(pm)
+            LLVM.API.LLVMAddGlobalOptimizerPass(pm)
             run!(pm, mod)
         end
     end
