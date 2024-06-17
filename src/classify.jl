@@ -64,7 +64,7 @@ function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
                 "box_uint8", "excstack_state", "restore_excstack", "enter_handler",
                 "pop_handler", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
                 "gc_disable_finalizers_internal", "gc_is_in_finalizer", "enable_gc_logging",
-                "gc_safepoint", "gc_collect", "genericmemory_owner") || occursin(r"^unbox_.*", name)
+                "gc_safepoint", "gc_collect", "genericmemory_owner", "get_pgcstack") || occursin(r"^unbox_.*", name)
         return false # these functions never allocate
     elseif name in ("f_ifelse", "f_typeassert", "f_is", "f_throw", "f__svec_ref",
                     "genericmemory_copyto")
