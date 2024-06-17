@@ -49,7 +49,7 @@ else
     end
 end
 
-struct CompileResult{Success, F, TT, RT}
+struct CompileResult{Success, F, TT, RT, ABI}
     f_ptr::Ptr{Cvoid}
     arg_types::Type{TT}
     return_type::Type{RT}
@@ -66,7 +66,9 @@ const tm = Ref{TargetMachine}() # for opt pipeline
 const _kernel_instances = Dict{Any, Any}()
 const compiler_cache = Dict{Any, CompileResult}()
 const config = CompilerConfig(DefaultCompilerTarget(), NativeParams();
-                              kernel=false, entry_abi = :specfunc, always_inline=false)
+                              kernel=false, entry_abi = :func, always_inline=false)
+const specsig_config = CompilerConfig(DefaultCompilerTarget(), NativeParams();
+                                      kernel=false, entry_abi = :specfunc, always_inline=false)
 
 const NativeCompilerJob = CompilerJob{NativeCompilerTarget,NativeParams}
 GPUCompiler.can_safepoint(@nospecialize(job::NativeCompilerJob)) = true
@@ -101,23 +103,28 @@ automatically and checked for allocations whenever the function changes or when 
 types or keyword arguments are provided.
 """
 function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
-    # cuda = active_state()
 
     Base.@lock codegen_lock begin
+
         # compile the function
         cache = compiler_cache
         source = GPUCompiler.methodinstance(F, tt)
         rt = Core.Compiler.return_type(f, tt)
 
+        specsig = false # TODO: selectively re-enable after reviewing `uses_specsig` in codegen.cpp
         function compile(@nospecialize(job::CompilerJob))
             return JuliaContext() do ctx
+
+                # First, compile once just to analyze allocations
+                specsig_job = GPUCompiler.CompilerJob(job.source, specsig_config, job.world)
+                ss_mod, ss_meta = GPUCompiler.compile(:llvm, specsig_job, validate=false)
+                optimize!(specsig_job, ss_mod)
+                analysis = find_allocs!(ss_mod, ss_meta; ignore_throw)
+
+                # Second, compile again (sigh) with the correct ABI for calling from a ccall
                 mod, meta = GPUCompiler.compile(:llvm, job, validate=false)
                 optimize!(job, mod)
-
-                clone = copy(mod)
-                analysis = find_allocs!(mod, meta; ignore_throw)
-                # TODO: This is the wrong meta
-                return clone, meta, analysis
+                return mod, meta, analysis
             end
         end
         function link(@nospecialize(job::CompilerJob), (mod, meta, analysis))
@@ -136,13 +143,15 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
                           "Failed to compile @check_allocs function"))
                 end
                 if length(analysis) == 0
-                    CompileResult{true, typeof(f), tt, rt}(f_ptr, tt, rt, f, analysis)
+                    CompileResult{true, typeof(f), tt, rt, specsig}(f_ptr, tt, rt, f, analysis)
                 else
-                    CompileResult{false, typeof(f), tt, rt}(f_ptr, tt, rt, f, analysis)
+                    CompileResult{false, typeof(f), tt, rt, specsig}(f_ptr, tt, rt, f, analysis)
                 end
             end
         end
-        fun = GPUCompiler.cached_compilation(cache, source, config, compile, link)
+
+        config′ = specsig ? specsig_config : config
+        fun = GPUCompiler.cached_compilation(cache, source, config′, compile, link)
 
         # create a callable object that captures the function instance. we don't need to think
         # about world age here, as GPUCompiler already does and will return a different object
@@ -151,9 +160,16 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
     end
 end
 
-function (f::CompileResult{Success, F, TT, RT})(args...) where {Success, F, TT, RT}
+function (f::CompileResult{Success, F, TT, RT, ABI})(args...) where {Success, F, TT, RT, ABI}
     if Success
-        return abi_call(f.f_ptr, RT, TT, f.func, args...)
+        if ABI
+            return abi_call(f.f_ptr, RT, TT, f.func, args...)
+        else
+            argsv = Any[args...]
+            GC.@preserve argsv begin
+                return ccall(f.f_ptr, Any, (Any, Ptr{Any}, UInt32), f.func, pointer(argsv), length(args))
+            end
+        end
     else
         error("@check_allocs function contains ", length(f.analysis), " allocations.")
     end
