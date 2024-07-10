@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Hot loops · AllocCheck Documentation</title><meta name="title" content="Hot loops · AllocCheck Documentation"/><meta property="og:title" content="Hot loops · AllocCheck Documentation"/><meta property="twitter:title" content="Hot loops · AllocCheck Documentation"/><meta name="description" content="Documentation for AllocCheck Documentation."/><meta property="og:description" content="Documentation for AllocCheck Documentation."/><meta property="twitter:description" content="Documentation for AllocCheck Documentation."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">AllocCheck Documentation</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Tutorials</span><ul><li><a class="tocitem" href="../optional_debugging_and_logging/">Optional debugging and logging</a></li><li class="is-active"><a class="tocitem" href>Hot loops</a><ul class="internal"><li><a class="tocitem" href="#More-complicated-initialization"><span>More complicated initialization</span></a></li></ul></li><li><a class="tocitem" href="../error_recovery/">Minimum latency error recovery</a></li></ul></li><li><a class="tocitem" href="../../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Tutorials</a></li><li class="is-active"><a href>Hot loops</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Hot loops</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaLang/AllocCheck.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaLang/AllocCheck.jl/blob/main/docs/src/tutorials/hot_loop.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Allocations-followed-by-a-hot-loop"><a class="docs-heading-anchor" href="#Allocations-followed-by-a-hot-loop">Allocations followed by a hot loop</a><a id="Allocations-followed-by-a-hot-loop-1"></a><a class="docs-heading-anchor-permalink" href="#Allocations-followed-by-a-hot-loop" title="Permalink"></a></h1><p>A common pattern in high-performance Julia code, as well as in real-time systems, is to initially allocate some working memory, followed by the execution of a performance sensitive <em>hot loop</em> that should perform no allocations. In the example below, we show a function <code>run_almost_forever</code> that resembles the implementation of a simple control system. The function starts by allocating a large <code>logvector</code> in which some measurement data is to be saved, followed by the execution of a loop which should run with as predictable timing as possible, i.e., we do not want to perform any allocations or invoke the garbage collector while executing the loop.</p><pre><code class="language-julia hljs">function run_almost_forever()
+    N = 100_000 # A large number
+    logvector = zeros(N) # Allocate a large vector for storing results
+    for i = 1:N # Run a hot loop that may not allocate
+        y = sample_measurement()
+        logvector[i] = y
+        u = controller(y)
+        apply_control(u)
+        Libc.systemsleep(0.01)
+    end
+end
+
+# Silly implementations of the functions used in the example
+sample_measurement() = 2.0
+controller(y) = -2y
+apply_control(u) = nothing</code></pre><p>Here, the primary concern is the loop, while the preamble of the function should be allowed to allocate memory. The recommended strategy in this case is to refactor the function into a separate preamble and loop, like this</p><pre><code class="language-julia hljs">function run_almost_forever2() # The preamble that performs allocations
+    N = 100_000 # A large number
+    logvector = zeros(N) # Allocate a large vector for storing results
+    run_almost_forever!(logvector)
+end
+
+function run_almost_forever!(logvector) # The hot loop that is allocation free
+    for i = eachindex(logvector) # Run a hot loop that may not allocate
+        y = sample_measurement()
+        @inbounds logvector[i] = y
+        u = controller(y)
+        apply_control(u)
+        Libc.systemsleep(0.01)
+    end
+end</code></pre><p>We may now analyze the loop function <code>run_almost_forever!</code> to verify that it does not allocate memory:</p><pre><code class="language-julia hljs">using AllocCheck, Test
+allocs = check_allocs(run_almost_forever!, (Vector{Float64},));
+@test isempty(allocs)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Test Passed</span></span></code></pre><h2 id="More-complicated-initialization"><a class="docs-heading-anchor" href="#More-complicated-initialization">More complicated initialization</a><a id="More-complicated-initialization-1"></a><a class="docs-heading-anchor-permalink" href="#More-complicated-initialization" title="Permalink"></a></h2><p>In practice, a function may need to perform several distinct allocations upfront, including potentially allocating objects of potentially complicated types, like closures etc. In situations like this, the following pattern may be useful:</p><pre><code class="language-julia hljs">struct Workspace
+    # All you need to run the hot loop, for example:
+    cache1::Vector{Float64}
+    cache2::Matrix{Float64}
+end
+
+function setup(max_iterations::Int = 100_000)
+    # Allocate and initialize the workspace
+    cache1 = zeros(max_iterations)
+    cache2 = zeros(max_iterations, max_iterations)
+    return Workspace(cache1, cache2)
+end
+
+function run!(workspace::Workspace)
+    # The hot loop
+    for i = eachindex(workspace.cache1)
+        workspace.cache1[i] = my_important_calculation() # The allocated cache is modified in place
+        ...
+    end
+end
+
+function run()
+    workspace = setup()
+    run!(workspace)
+end</code></pre><p>Here, <code>workspace</code> is a custom struct designed to serve as a workspace for the hot loop, but it could also be realized as a simple tuple of all the allocated objects required for the computations. Note, the struct <code>Workspace</code> in this example was not marked as mutable. However, its contents, the two cache arrays, are. This means that the <code>run!</code> function may modify the contents of the cache arrays.</p><p>The benefit of breaking the function up into two parts which are called from a third, is that we may now create the workspace object individually, and use it to compute the type of the arguments to the <code>run!</code> function that we are interested in analyzing:</p><pre><code class="language-julia hljs">workspace = setup()
+allocs = check_allocs(run!, (typeof(workspace),))</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../optional_debugging_and_logging/">« Optional debugging and logging</a><a class="docs-footer-nextpage" href="../error_recovery/">Minimum latency error recovery »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.5.0 on <span class="colophon-date" title="Wednesday 10 July 2024 23:58">Wednesday 10 July 2024</span>. Using Julia version 1.10.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
