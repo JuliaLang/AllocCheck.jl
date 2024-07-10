@@ -111,8 +111,8 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
 
         function compile(@nospecialize(job::CompilerJob))
             return JuliaContext() do ctx
-                mod, meta = GPUCompiler.compile(:llvm, job, validate=false)
-                optimize!(job, mod)
+                mod, meta = GPUCompiler.compile(:llvm, job, validate=false, optimize=true)
+                # optimize!(job, mod) # TODO
 
                 clone = copy(mod)
                 analysis = find_allocs!(mod, meta; ignore_throw)

@@ -204,8 +204,8 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
     target = DefaultCompilerTarget()
     job = CompilerJob(source, config)
     allocs = JuliaContext() do ctx
-        mod, meta = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
-        optimize!(job, mod)
+        mod, meta = GPUCompiler.compile(:llvm, job, validate=false, optimize=true, cleanup=false)
+        # GPUCompiler.optimize!(job, mod) # TODO: Why is this broken?
 
         allocs = find_allocs!(mod, meta; ignore_throw)
         # display(mod)
