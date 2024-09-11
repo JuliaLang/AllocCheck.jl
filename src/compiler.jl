@@ -90,10 +90,12 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
         function compile(@nospecialize(job::CompilerJob))
             return JuliaContext() do ctx
                 mod, meta = GPUCompiler.compile(:llvm, job, validate=false)
+                (; entry, compiled) = meta
+                entry_name = name(entry)
                 optimize!(mod)
 
                 clone = copy(mod)
-                analysis = find_allocs!(mod, meta; ignore_throw, invoke_entry=true)
+                analysis = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=true)
                 # TODO: This is the wrong meta
                 return clone, meta, analysis
             end
