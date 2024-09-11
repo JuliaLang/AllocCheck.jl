@@ -327,8 +327,25 @@ Documentation for `issue64`.
   v[i], v[j] = v[j], v[i]
   v
 end
-let io = IOBuffer()
-    print(io, @doc issue64)
-    s = String(take!(io))
-    @test occursin("Documentation for `issue64`.", s)
+@check_allocs function foo_with_union_rt(t::Tuple{Float64, Float64})
+    if rand((1, -1)) == 1
+        return t
+    else
+        return nothing
+    end
+end
+
+@testset "issues" begin
+    # issue #64
+    let io = IOBuffer()
+        print(io, @doc issue64)
+        s = String(take!(io))
+        @test occursin("Documentation for `issue64`.", s)
+    end
+
+    # issue #70
+    x = foo_with_union_rt((1.0, 1.5))
+    @test x === nothing || x === (1.0, 1.5)
+    x = foo_with_union_rt((1.0, 1.5))
+    @test x === nothing || x === (1.0, 1.5)
 end

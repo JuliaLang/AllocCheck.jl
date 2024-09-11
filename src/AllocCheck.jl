@@ -93,12 +93,27 @@ Find all static allocation sites in the provided LLVM IR.
 
 This function modifies the LLVM module in-place, effectively trashing it.
 """
-function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true)
+function find_allocs!(mod::LLVM.Module, meta; ignore_throw=true, invoke_entry=false)
     (; entry, compiled) = meta
 
     errors = []
     worklist = LLVM.Function[ entry ]
     seen = LLVM.Function[ entry ]
+    if invoke_entry
+        @assert startswith(name(entry), "jfptr")
+        f = pop!(worklist)
+        for block in blocks(f)
+            for inst in instructions(block)
+                if isa(inst, LLVM.CallInst)
+                    decl = called_operand(inst)
+                    if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
+                        push!(worklist, decl)
+                        push!(seen, decl)
+                    end
+                end
+            end
+        end
+    end
     while !isempty(worklist)
         f = pop!(worklist)
 
@@ -202,12 +217,12 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
     end
     source = GPUCompiler.methodinstance(Base._stable_typeof(func), Base.to_tuple_type(types))
     target = DefaultCompilerTarget()
-    job = CompilerJob(source, config)
+    job = CompilerJob(source, alloc_config(:specfunc))
     allocs = JuliaContext() do ctx
         mod, meta = GPUCompiler.compile(:llvm, job, validate=false, optimize=false, cleanup=false)
-        optimize!(job, mod)
+        optimize!(mod)
 
-        allocs = find_allocs!(mod, meta; ignore_throw)
+        allocs = find_allocs!(mod, meta; ignore_throw, invoke_entry=false)
         # display(mod)
         # dispose(mod)
         allocs
