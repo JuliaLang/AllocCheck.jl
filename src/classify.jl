@@ -62,7 +62,7 @@ function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
     if name in ("egal__unboxed", "lock_value", "unlock_value", "get_nth_field_noalloc",
                 "load_and_lookup", "lazy_load_and_lookup", "box_bool", "box_int8",
                 "box_uint8", "excstack_state", "restore_excstack", "enter_handler",
-                "pop_handler", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
+                "pop_handler", "pop_handler_noexcept", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
                 "gc_disable_finalizers_internal", "gc_is_in_finalizer", "enable_gc_logging",
                 "gc_safepoint", "gc_collect", "genericmemory_owner", "get_pgcstack") || occursin(r"^unbox_.*", name)
         return false # these functions never allocate

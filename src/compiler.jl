@@ -97,10 +97,10 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
                 clone = copy(mod)
                 analysis = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=true)
                 # TODO: This is the wrong meta
-                return clone, meta, analysis
+                return clone, entry_name, analysis
             end
         end
-        function link(@nospecialize(job::CompilerJob), (mod, meta, analysis))
+        function link(@nospecialize(job::CompilerJob), (mod, entry_name, analysis))
             return JuliaContext() do ctx
                 lljit = jit[].jit
                 jd = LLVM.JITDylib(lljit)
@@ -110,7 +110,7 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
                     GPUCompiler.ThreadSafeModule(mod)
                 end
                 LLVM.add!(lljit, jd, tsm)
-                f_ptr = pointer(LLVM.lookup(lljit, LLVM.name(meta.entry)))
+                f_ptr = pointer(LLVM.lookup(lljit, entry_name))
                 if f_ptr == C_NULL
                     throw(GPUCompiler.InternalCompilerError(job,
                           "Failed to compile @check_allocs function"))
