@@ -20,7 +20,8 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
     if name in ("alloc_genericmemory", "genericmemory_copy", "genericmemory_copy_slice",
                 "string_to_genericmemory", "ptr_to_genericmemory", "array_copy", "alloc_string",
                 "alloc_array_1d", "alloc_array_2d", "alloc_array_3d", "gc_alloc_typed",
-                "gc_pool_alloc", "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented"
+                "gc_small_alloc", "gc_pool_alloc", "gc_small_alloc_instrumented",
+                "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented"
                ) || occursin(r"^box_.*", name)
         return (:alloc, may_alloc)
     elseif name in ("f__apply_latest", "f__apply_iterate", "f__apply_pure", "f__call_latest",
@@ -62,7 +63,7 @@ function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
     if name in ("egal__unboxed", "lock_value", "unlock_value", "get_nth_field_noalloc",
                 "load_and_lookup", "lazy_load_and_lookup", "box_bool", "box_int8",
                 "box_uint8", "excstack_state", "restore_excstack", "enter_handler",
-                "pop_handler", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
+                "pop_handler", "pop_handler_noexcept", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
                 "gc_disable_finalizers_internal", "gc_is_in_finalizer", "enable_gc_logging",
                 "gc_safepoint", "gc_collect", "genericmemory_owner", "get_pgcstack") || occursin(r"^unbox_.*", name)
         return false # these functions never allocate
@@ -141,7 +142,7 @@ function resolve_allocations(call::LLVM.Value)
     isnothing(match_) && return nothing
     name = match_[2]
 
-    if name in ("gc_pool_alloc_instrumented", "gc_big_alloc_instrumented", "gc_alloc_typed")
+    if name in ("gc_pool_alloc_instrumented", "gc_small_alloc_instrumented", "gc_big_alloc_instrumented", "gc_alloc_typed")
         type = resolve_static_jl_value_t(operands(call)[end-1])
         return type !== nothing ? [(call, type)] : nothing
     elseif name in ("alloc_array_1d", "alloc_array_2d", "alloc_array_3d")
@@ -179,7 +180,7 @@ function resolve_allocations(call::LLVM.Value)
         typestr == "uint8pointer" && return [(call, Ptr{UInt8})]
         typestr == "voidpointer" && return [(call, Ptr{Cvoid})]
         @assert false # above is exhaustive
-    elseif name == "gc_pool_alloc"
+    elseif name in ("gc_pool_alloc", "gc_small_alloc")
         seen = Set()
         allocs = Tuple{LLVM.Instruction, Any}[]
         for calluse in transitive_uses(call; unwrap = (use)->user(use) isa LLVM.BitCastInst)
