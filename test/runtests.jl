@@ -191,10 +191,10 @@ end
 @testset "Types of Allocations" begin
     if VERSION > v"1.11.0-DEV.753"
         @test  any(x isa AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
-                   for x in check_allocs(copyto!, (Memory{Int}, Int, Memory{Int}, Int); ignore_throw = false))
+                   for x in check_allocs(copyto!, (Memory{Foo{Int}}, Int, Memory{Foo{Int}}, Int); ignore_throw = false))
 
         @test !any(x isa AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
-                   for x in check_allocs(copyto!, (Memory{Int}, Int, Memory{Int}, Int); ignore_throw = true))
+                   for x in check_allocs(copyto!, (Memory{Foo{Int}}, Int, Memory{Foo{Int}}, Int); ignore_throw = true))
 
         @test  all(x isa AllocationSite && x.type == Memory{Int}   # uses jl_alloc_genericmemory
                    for x in check_allocs(Memory{Int}, (typeof(undef), Int); ignore_throw = false))
