@@ -1,5 +1,5 @@
 using AllocCheck
-using AllocCheck: AllocatingRuntimeCall, DynamicDispatch, AllocationSite
+using AllocCheck: AllocatingRuntimeCall, DynamicDispatch, AllocationSite, UnresolvedRuntimeCall
 using Test
 
 mutable struct Foo{T}
@@ -75,7 +75,7 @@ end
               for alloc in allocs)
 
     allocs = check_allocs(call_opaque_closure, (Int, Int); ignore_throw = false)
-    @test length(allocs) > 0 && any(alloc isa DynamicDispatch for alloc in allocs)
+    @test length(allocs) > 0 && any(alloc isa UnresolvedRuntimeCall for alloc in allocs)
 end
 
 @testset "@check_allocs macro (syntax)" begin
@@ -205,11 +205,11 @@ end
         @test  any(x isa AllocationSite && x.type == Memory        # uses jl_genericmemory_copy_slice
                    for x in check_allocs(copy, (Vector{Int},)))
 
-        @test  all(x isa DynamicDispatch || (x isa AllocationSite && x.type == Memory{UInt8}) # uses jl_string_to_genericmemory
+        @test  all(x isa UnresolvedRuntimeCall || (x isa AllocationSite && x.type == Memory{UInt8}) # uses jl_string_to_genericmemory
                    for x in check_allocs(Base.array_new_memory, (Memory{UInt8}, Int)))
 
         # Marked broken because the `Expr(:foreigncall, QuoteNode(:jl_alloc_string), ...)` should be resolved
-        # by AllocCheck.jl, but is instead (conservatively) marked as a DynamicDisaptch.
+        # by AllocCheck.jl, but is instead (conservatively) marked as a UnresolvedRuntimeCall
         #
         # We get thrown off by the `jl_load_and_lookup` machinery here.
         @test_broken all(x isa AllocationSite && x.type == Memory{UInt8} # uses jl_string_to_genericmemory

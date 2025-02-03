@@ -162,6 +162,9 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
                         bt = backtrace_(inst; compiled)
                         fname = replace(name(decl), r"^ijl_"=>"jl_")
                         push!(errors, AllocatingRuntimeCall(fname, bt))
+                    elseif class === :unresolved
+                        bt = backtrace_(inst; compiled)
+                        push!(errors, UnresolvedRuntimeCall(bt))
                     end
 
                     if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
