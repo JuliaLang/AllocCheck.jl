@@ -56,8 +56,9 @@ const tm = Ref{TargetMachine}() # for opt pipeline
 # cache of kernel instances
 const _kernel_instances = Dict{Any, Any}()
 const compiler_cache = Dict{Any, CompileResult}()
-alloc_config(func_abi::Symbol) = CompilerConfig(DefaultCompilerTarget(), NativeParams();
-                              kernel=false, entry_abi = func_abi, always_inline=false)
+alloc_config(func_abi::Symbol; kwargs...) =
+    CompilerConfig(DefaultCompilerTarget(), NativeParams();
+                   kernel=false, entry_abi = func_abi, always_inline=false, kwargs...)
 
 const NativeCompilerJob = CompilerJob{NativeCompilerTarget,NativeParams}
 GPUCompiler.can_safepoint(@nospecialize(job::NativeCompilerJob)) = true
@@ -89,7 +90,7 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
 
         function compile(@nospecialize(job::CompilerJob))
             return JuliaContext() do ctx
-                mod, meta = GPUCompiler.compile(:llvm, job, validate=false)
+                mod, meta = GPUCompiler.compile(:llvm, job)
                 (; entry, compiled) = meta
                 entry_name = name(entry)
                 optimize!(mod)
@@ -122,7 +123,8 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
                 end
             end
         end
-        fun = GPUCompiler.cached_compilation(cache, source, alloc_config(:func), compile, link)
+        config = alloc_config(:func, validate=false)
+        fun = GPUCompiler.cached_compilation(cache, source, config, compile, link)
 
         # create a callable object that captures the function instance. we don't need to think
         # about world age here, as GPUCompiler already does and will return a different object
