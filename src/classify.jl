@@ -13,7 +13,7 @@ perform allocation, but which might allocate to get its job done (e.g. jl_subtyp
 function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
     match_ = match(r"^(ijl_|jl_)(.*)$", name)
 
-    isnothing(match_) && return (:unknown, false)
+    isnothing(match_) && return (:none, false)
     name = match_[2]
 
     may_alloc = fn_may_allocate(name; ignore_throw)
@@ -28,8 +28,10 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
                     "f__call_in_world", "f__call_in_world_total", "f_intrinsic_call", "f_invoke",
                     "f_opaque_closure_call", "apply", "apply_generic", "gf_invoke",
                     "gf_invoke_by_method", "gf_invoke_lookup_worlds", "invoke", "invoke_api",
-                    "call", "call0", "call1", "call2", "call3", "unknown_fptr")
+                    "call", "call0", "call1", "call2", "call3")
         return (:dispatch, may_alloc)
+    elseif name == "unknown_fptr"
+        return (:unresolved, false)
     else
         return (:runtime, may_alloc)
     end
@@ -222,7 +224,7 @@ and replace it with a new locally-declared function that has the
 resolved name as its identifier.
 """
 function rename_call!(call::LLVM.CallInst, mod::LLVM.Module)
-    callee = called_operand(call)
+    callee = LLVM.called_operand(call)
     if isa(callee, LLVM.LoadInst)
 
         fn_got = unwrap_ptr_casts(operands(callee)[1])
@@ -252,7 +254,7 @@ function rename_call!(call::LLVM.CallInst, mod::LLVM.Module)
         # Call to a runtime-determined function pointer, usually an OpaqueClosure
         # or a ccall that we were not able to fully resolve.
         #
-        # We label this as a DynamicDispatch to an unknown function target.
+        # We label this as an UnresolvedRuntimeCall, and request that the user report our bug
         fname = "jl_unknown_fptr"
     end
 
