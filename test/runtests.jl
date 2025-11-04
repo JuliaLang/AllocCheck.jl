@@ -196,13 +196,14 @@ end
         @test !any(x isa AllocatingRuntimeCall && x.name == "jl_genericmemory_copyto"
                    for x in check_allocs(copyto!, (Memory{Foo{Int}}, Int, Memory{Foo{Int}}, Int); ignore_throw = true))
 
-        @test  all(x isa AllocationSite && x.type == Memory{Int}   # uses jl_alloc_genericmemory
+        @test  all((x isa AllocationSite && x.type == Memory{Int}) || # uses jl_alloc_genericmemory / jl_alloc_genericmemory_unchecked (1.12+)
+                   (x isa AllocatingRuntimeCall && x.name == "jl_argument_error")
                    for x in check_allocs(Memory{Int}, (typeof(undef), Int); ignore_throw = false))
 
-        @test  any(x isa AllocationSite && x.type == Memory        # uses jl_genericmemory_copy
+        @test  any(x isa AllocationSite && (x.type == Memory || x.type == Memory{Int})  # uses jl_genericmemory_copy / jl_alloc_genericmemory_unchecked (1.12+)
                    for x in check_allocs(copy, (Memory{Int},)))
 
-        @test  any(x isa AllocationSite && x.type == Memory        # uses jl_genericmemory_copy_slice
+        @test  any(x isa AllocationSite && (x.type == Memory || x.type == Memory{Int})  # uses jl_genericmemory_copy_slice / jl_alloc_genericmemory_unchecked (1.12+)
                    for x in check_allocs(copy, (Vector{Int},)))
 
         @test  all(x isa DynamicDispatch || (x isa AllocationSite && x.type == Memory{UInt8}) # uses jl_string_to_genericmemory
