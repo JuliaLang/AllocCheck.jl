@@ -17,7 +17,8 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
     name = match_[2]
 
     may_alloc = fn_may_allocate(name; ignore_throw)
-    if name in ("alloc_genericmemory", "genericmemory_copy", "genericmemory_copy_slice",
+    if name in ("alloc_genericmemory", "alloc_genericmemory_unchecked",
+                "genericmemory_copy", "genericmemory_copy_slice",
                 "string_to_genericmemory", "ptr_to_genericmemory", "array_copy", "alloc_string",
                 "alloc_array_1d", "alloc_array_2d", "alloc_array_3d", "gc_alloc_typed",
                 "gc_small_alloc", "gc_pool_alloc", "gc_small_alloc_instrumented",
@@ -160,6 +161,9 @@ function resolve_allocations(call::LLVM.Value)
         return [(call, Memory{UInt8})]
     elseif name == "alloc_genericmemory"
         type = resolve_static_jl_value_t(operands(call)[1])
+        return [(call, type !== nothing ? type : Memory)]
+    elseif name == "alloc_genericmemory_unchecked"
+        type = resolve_static_jl_value_t(operands(call)[3])
         return [(call, type !== nothing ? type : Memory)]
     elseif occursin(r"^box_(.*)", name)
         typestr = match(r"^box_(.*)", name).captures[end]
