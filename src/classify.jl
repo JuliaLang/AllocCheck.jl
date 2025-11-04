@@ -194,7 +194,10 @@ function resolve_allocations(call::LLVM.Value)
             # Check that this points into the type tag (at a -1 offset)
             offset = operands(gep)[2]
             !isa(offset, LLVM.ConstantInt) && continue
-            (convert(Int, offset) != -1) && continue
+            offset = convert(Int, offset)
+
+            # TODO: this should check gep->getSourceElementType() when that is available in LLVM C API
+            (offset != -1 && offset != -8) && continue
 
             # Now, look for the store into the type tag and count that as our allocation(s)
             for gepuse in uses(gep)
@@ -215,6 +218,7 @@ function resolve_allocations(call::LLVM.Value)
                 push!(allocs, (store, type))
             end
         end
+        isempty(allocs) && return [(call, Any)] # could not identify any type-tag (probably a bug!)
         return allocs
     end
     return nothing
