@@ -108,12 +108,37 @@ end
 """
 Returns `nothing` if the value could not be resolved statically.
 """
-function resolve_static_jl_value_t(val::LLVM.Value)
+function resolve_static_uint(val::LLVM.Value)
     val = unwrap_ptr_casts(val)
     val = look_through_loads(val)
     !isa(val, ConstantInt) && return nothing
-    ptr = reinterpret(Ptr{Cvoid}, convert(UInt, val))
-    return Base.unsafe_pointer_to_objref(ptr)
+    return convert(UInt, val)
+end
+
+"""
+Returns `nothing` if the value could not be resolved statically.
+"""
+function resolve_static_jl_value(val::LLVM.Value)
+    addr = resolve_static_uint(val)
+    addr === nothing && return nothing
+    return Base.unsafe_pointer_to_objref(Ptr{Cvoid}(addr))
+end
+
+"""
+Returns `nothing` if the value could not be resolved statically.
+"""
+function resolve_static_type_tag(val::LLVM.Value)
+    type_tag = resolve_static_uint(val)
+    type_tag === nothing && return nothing
+    type_addr = if type_tag < (JL_MAX_TAGS << 4)
+        # "small" type tags are indices into a special array
+        jl_small_typeof = Ptr{Ptr{Cvoid}}(cglobal(:jl_small_typeof))
+        type_idx = type_tag ÷ Core.sizeof(Ptr{Cvoid})
+	unsafe_load(jl_small_typeof, type_idx + 1)
+    else
+        Ptr{Cvoid}(type_tag)
+    end
+    return Base.unsafe_pointer_to_objref(type_addr)
 end
 
 function transitive_uses(inst::LLVM.Instruction; unwrap = (use)->false)
@@ -127,6 +152,8 @@ function transitive_uses(inst::LLVM.Instruction; unwrap = (use)->false)
     end
     return uses_
 end
+
+const JL_MAX_TAGS = 64 # see `enum jl_small_typeof_tags` in julia.h
 
 """
 Returns `nothing` if the type could not be resolved statically.
@@ -144,10 +171,10 @@ function resolve_allocations(call::LLVM.Value)
     name = match_[2]
 
     if name in ("gc_pool_alloc_instrumented", "gc_small_alloc_instrumented", "gc_big_alloc_instrumented", "gc_alloc_typed")
-        type = resolve_static_jl_value_t(operands(call)[end-1])
+        type = resolve_static_type_tag(operands(call)[end-1])
         return type !== nothing ? [(call, type)] : nothing
     elseif name in ("alloc_array_1d", "alloc_array_2d", "alloc_array_3d")
-        type = resolve_static_jl_value_t(operands(call)[1])
+        type = resolve_static_jl_value(operands(call)[1])
         return type!== nothing ? [(call, type)] : nothing
     elseif name == "alloc_string"
         return [(call, String)]
@@ -160,10 +187,10 @@ function resolve_allocations(call::LLVM.Value)
         @assert VERSION > v"1.11.0-DEV.753"
         return [(call, Memory{UInt8})]
     elseif name == "alloc_genericmemory"
-        type = resolve_static_jl_value_t(operands(call)[1])
+        type = resolve_static_jl_value(operands(call)[1])
         return [(call, type !== nothing ? type : Memory)]
     elseif name == "alloc_genericmemory_unchecked"
-        type = resolve_static_jl_value_t(operands(call)[3])
+        type = resolve_static_jl_value(operands(call)[3])
         return [(call, type !== nothing ? type : Memory)]
     elseif occursin(r"^box_(.*)", name)
         typestr = match(r"^box_(.*)", name).captures[end]
@@ -207,8 +234,7 @@ function resolve_allocations(call::LLVM.Value)
                 # It is possible for the optimizer to merge multiple distinct `gc_pool_alloc`
                 # allocations which actually have distinct types, so here we count each type
                 # tag store as a separate allocation.
-                type_tag = operands(store)[1]
-                type = resolve_static_jl_value_t(type_tag)
+		type = resolve_static_type_tag(operands(store)[1])
                 if type === nothing
                     type = Any
                 end

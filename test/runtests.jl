@@ -340,6 +340,10 @@ end
     end
 end
 
+function svec_alloc(x)
+    return Core.svec(x, 1)
+end
+
 @testset "issues" begin
     # issue #64
     let io = IOBuffer()
@@ -353,4 +357,7 @@ end
     @test x === nothing || x === (1.0, 1.5)
     x = foo_with_union_rt((1.0, 1.5))
     @test x === nothing || x === (1.0, 1.5)
+
+    # issue #96
+    @test length(check_allocs(svec_alloc, (ErrorException,))) > 0
 end
