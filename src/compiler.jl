@@ -111,7 +111,7 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
                     GPUCompiler.ThreadSafeModule(mod)
                 end
                 LLVM.add!(lljit, jd, tsm)
-                f_ptr = pointer(LLVM.lookup(lljit, entry_name))
+                f_ptr = pointer(LLVM.lookup(lljit, jd, entry_name))
                 if f_ptr == C_NULL
                     throw(GPUCompiler.InternalCompilerError(job,
                           "Failed to compile @check_allocs function"))
