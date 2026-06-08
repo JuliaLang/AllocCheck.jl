@@ -27,6 +27,10 @@ jobs:
           - ubuntu-latest
         arch:
           - x64
+        include:
+          - version: '1.12'
+            os: macos-latest
+            arch: aarch64
     steps:
       - uses: actions/checkout@v3
       - uses: julia-actions/setup-julia@v2
