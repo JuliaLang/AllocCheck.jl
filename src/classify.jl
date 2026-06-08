@@ -64,12 +64,13 @@ function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
     if name in ("egal__unboxed", "lock_value", "unlock_value", "get_nth_field_noalloc",
                 "load_and_lookup", "lazy_load_and_lookup", "box_bool", "box_int8",
                 "box_uint8", "excstack_state", "restore_excstack", "enter_handler",
-                "pop_handler", "pop_handler_noexcept", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
+                "pop_handler", "pop_handler_noexcept", "f_typeof", "clock_now", "throw",
+                "gc_queue_root", "gc_enable",
                 "gc_disable_finalizers_internal", "gc_is_in_finalizer", "enable_gc_logging",
                 "gc_safepoint", "gc_collect", "genericmemory_owner", "get_pgcstack") || occursin(r"^unbox_.*", name)
         return false # these functions never allocate
-    elseif name in ("f_ifelse", "f_typeassert", "f_is", "f_throw", "f__svec_ref",
-                    "genericmemory_copyto")
+    elseif name in ("f_ifelse", "f_typeassert", "f_is", "f_isdefined", "f_throw", "f__svec_ref",
+                    "genericmemory_copyto", "field_index")
         return ignore_throw == false # these functions only allocate if they throw
     else
         return true
@@ -134,7 +135,7 @@ function resolve_static_type_tag(val::LLVM.Value)
         # "small" type tags are indices into a special array
         jl_small_typeof = Ptr{Ptr{Cvoid}}(cglobal(:jl_small_typeof))
         type_idx = type_tag ÷ Core.sizeof(Ptr{Cvoid})
-	unsafe_load(jl_small_typeof, type_idx + 1)
+        unsafe_load(jl_small_typeof, type_idx + 1)
     else
         Ptr{Cvoid}(type_tag)
     end
@@ -234,7 +235,7 @@ function resolve_allocations(call::LLVM.Value)
                 # It is possible for the optimizer to merge multiple distinct `gc_pool_alloc`
                 # allocations which actually have distinct types, so here we count each type
                 # tag store as a separate allocation.
-		type = resolve_static_type_tag(operands(store)[1])
+                type = resolve_static_type_tag(operands(store)[1])
                 if type === nothing
                     type = Any
                 end
