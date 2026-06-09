@@ -2,7 +2,7 @@
 
 [AllocCheck.jl](https://github.com/JuliaLang/AllocCheck.jl) is a Julia package that statically checks if a function call may allocate, analyzing the generated LLVM IR of it and it's callees using LLVM.jl and GPUCompiler.jl
 
-AllocCheck operates on _functions_, trying to statically determine wether or not a function _may_ allocate memory, and if so, _where_ that allocation appears. This is different from measuring allocations using, e.g., `@time` or `@allocated`, which measures the allocations that _did_ happen during the execution of a function.
+AllocCheck operates on _functions_, trying to statically determine whether or not a function _may_ allocate memory, and if so, _where_ that allocation appears. This is different from measuring allocations using, e.g., `@time` or `@allocated`, which measures the allocations that _did_ happen during the execution of a function.
 
 ## Getting started
 
