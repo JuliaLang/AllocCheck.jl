@@ -1,3 +1,20 @@
+struct UnresolvedRuntimeCall
+    backtrace::Vector{Base.StackTraces.StackFrame}
+end
+
+Base.hash(self::UnresolvedRuntimeCall, h::UInt) = nice_hash(self.backtrace, h)
+Base.:(==)(self::UnresolvedRuntimeCall, other::UnresolvedRuntimeCall) = nice_isequal(self.backtrace,other.backtrace)
+
+function Base.show(io::IO, call::UnresolvedRuntimeCall)
+    if length(call.backtrace) == 0
+        Base.printstyled(io, "Unresolved runtime call", color=:red, bold=true)
+    else
+        Base.printstyled(io, "Unresolved runtime call", color=:red, bold=true)
+        Base.println(io, " in ", call.backtrace[1].file, ":", call.backtrace[1].line)
+        show_backtrace_and_excerpt(io, call.backtrace)
+    end
+    Base.println(io, " (This is an AllocCheck.jl bug, please report it at https://github.com/JuliaLang/AllocCheck.jl/issues)")
+end
 
 struct AllocatingRuntimeCall
     name::String
