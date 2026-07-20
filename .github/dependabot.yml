@@ -1,0 +1,23 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 15
+  - package-ecosystem: "julia"
+    # Location of Julia projects
+    directories:
+      - "/"
+      - "/docs"
+      - "/test"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Ignore package itself
+      - dependency-name: "AllocCheck"
+    groups:
+      per-dependency:
+        group-by: dependency-name
