@@ -361,3 +361,21 @@ end
     # issue #96
     @test length(check_allocs(svec_alloc, (ErrorException,))) > 0
 end
+
+@check_allocs returns_bool(x::Float64) = x > 0
+
+@testset "boxed Bool identity" begin
+    valptr(@nospecialize x) = ccall(:jl_value_ptr, Ptr{Cvoid}, (Any,), x)
+
+    # A `@check_allocs` function returns through the boxed `:func` ABI, so a
+    # `Bool` result comes back as the `jl_true`/`jl_false` singleton. Those must
+    # be the runtime's own objects: a module-local replica lives in read-only
+    # data, and the collector segfaults setting mark bits in it once such a
+    # pointer reaches GC-tracked memory.
+    @test valptr(returns_bool(1.0)) == valptr(true)
+    @test valptr(returns_bool(-1.0)) == valptr(false)
+
+    keep = Any[returns_bool(1.0), returns_bool(-1.0)]
+    GC.gc(true)
+    @test keep == Any[true, false]
+end
