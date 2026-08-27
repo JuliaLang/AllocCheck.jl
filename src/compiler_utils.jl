@@ -1,7 +1,12 @@
 import LLVM, GPUCompiler
 using GPUCompiler: NativeCompilerTarget
 
-struct NativeParams <: GPUCompiler.AbstractCompilerParams end
+# `ignore_throw` is part of the compiler configuration (rather than only a keyword to the
+# analysis) so that cached analysis results are keyed by it.
+struct NativeParams <: GPUCompiler.AbstractCompilerParams
+    ignore_throw::Bool
+end
+NativeParams() = NativeParams(true)
 
 DefaultCompilerTarget(; kwargs...) = NativeCompilerTarget(; jlruntime=true, kwargs...)
 
@@ -13,12 +18,4 @@ function llvm_codegen_level(opt_level::Integer)
     else
         optlevel = LLVM.API.LLVMCodeGenLevelAggressive
     end
-end
-
-function cpu_name()
-    ccall(:jl_get_cpu_name, String, ())
-end
-
-function cpu_features()
-    return ccall(:jl_get_cpu_features, String, ())
 end

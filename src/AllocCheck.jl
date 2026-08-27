@@ -101,7 +101,6 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
     worklist = LLVM.Function[ entry ]
     seen = LLVM.Function[ entry ]
     if invoke_entry
-        @assert startswith(name(entry), "jfptr")
         f = pop!(worklist)
         for block in blocks(f)
             for inst in instructions(block)
@@ -217,20 +216,28 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
         throw(MethodError(func, types))
     end
     source = GPUCompiler.methodinstance(Base._stable_typeof(func), Base.to_tuple_type(types))
-    config = alloc_config(:specfunc; validate=false, optimize=false, cleanup=false)
+    config = alloc_config(:specfunc; ignore_throw, validate=false, optimize=false, cleanup=false)
     job = CompilerJob(source, config)
-    allocs = JuliaContext() do ctx
-        mod, meta = GPUCompiler.compile(:llvm, job)
-        (; entry, compiled) = meta
-        entry_name = name(entry)
-        optimize!(mod)
 
-        allocs = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=false)
-        # display(mod)
-        # dispose(mod)
-        allocs
+    # the analysis results are session-portable, so cache them across sessions
+    res = GPUCompiler.cached_results(AllocCheckResults, job)
+    if res === nothing || res.analysis === nothing
+        analysis = JuliaContext() do ctx
+            mod, meta = GPUCompiler.compile(:llvm, job)
+            entry_name = name(meta.entry)
+            optimize!(mod)
+
+            # the analysis needs concrete values (e.g. type tags)
+            GPUCompiler.apply_relocations!(mod, meta.relocations)
+
+            find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=false)
+        end
+        # compiling may have created the CodeInstance we attach results to
+        res = @something(res, GPUCompiler.cached_results(AllocCheckResults, job),
+                         AllocCheckResults())
+        res.analysis = analysis
     end
-    return allocs
+    return res.analysis
 end
 
 
