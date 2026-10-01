@@ -2,8 +2,8 @@ module AllocCheck
 
 import LLVM, GPUCompiler
 using GPUCompiler: JuliaContext, safe_name
-using LLVM: BasicBlock, ConstantExpr, ConstantInt, InlineAsm, IRBuilder, UndefValue,
-            br!, dispose, dominates, isdeclaration, position!, ret!, switch!
+using LLVM: @dispose, BasicBlock, ConstantExpr, ConstantInt, InlineAsm, IRBuilder, UndefValue,
+            br!, dominates, isdeclaration, position!, ret!, switch!
 
 include("static_backtrace.jl")
 include("classify.jl")
@@ -27,58 +27,59 @@ function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
     any_throw = BasicBlock(f, "any_throw")
     any_catch = BasicBlock(f, "any_catch")
 
-    builder = IRBuilder()
+    throw_ret, catch_switch = @dispose builder=IRBuilder() begin
+        position!(builder, LLVM.at_end(any_throw))
+        throw_ret = ret!(builder)                                # Dummy inst for post-dominance test
 
-    position!(builder, LLVM.at_end(any_throw))
-    throw_ret = ret!(builder)                                # Dummy inst for post-dominance test
+        position!(builder, LLVM.at_end(any_catch))
+        undef_i32 = UndefValue(LLVM.Int32Type())
+        catch_switch = switch!(builder, undef_i32, any_catch, 0) # Dummy inst for dominance test
 
-    position!(builder, LLVM.at_end(any_catch))
-    undef_i32 = UndefValue(LLVM.Int32Type())
-    catch_switch = switch!(builder, undef_i32, any_catch, 0) # Dummy inst for dominance test
+        for block in f.blocks
+            for inst in block.instructions
+                if isa(inst, LLVM.CallInst)
+                    rename_call!(inst, mod)
+                    decl = inst.called_operand
 
-    for block in f.blocks
-        for inst in block.instructions
-            if isa(inst, LLVM.CallInst)
-                rename_call!(inst, mod)
-                decl = inst.called_operand
+                    # `throw`: Add pseudo-edge to any_throw
+                    if decl.name == "ijl_throw" || decl.name == "llvm.trap"
+                        position!(builder, LLVM.at_end(block))
+                        brinst = br!(builder, any_throw)
+                    end
 
-                # `throw`: Add pseudo-edge to any_throw
-                if decl.name == "ijl_throw" || decl.name == "llvm.trap"
+                    # `catch`: Add pseudo-edge from any_catch
+                    if decl.name == "__sigsetjmp" || decl.name == "sigsetjmp"
+                        icmp_ = only(inst.users) # Asserts one usage
+                        @assert icmp_ isa LLVM.ICmpInst
+                        @assert convert(Int, icmp_.operands[2]) == 0
+                        for br_ in icmp_.users
+                            @assert br_ isa LLVM.BrInst
+
+                            # Rewrite the jump to this `catch` block as an indirect jump
+                            # from a common `any_catch` block
+                            _, catch_target = br_.successors
+                            br_.successors[2] = any_catch
+                            branch_index = ConstantInt(Int32(length(catch_switch.successors)))
+                            push!(catch_switch.cases, (branch_index, catch_target))
+                        end
+                    end
+                elseif isa(inst, LLVM.UnreachableInst)
+
+                    # By assuming forward-progress, we know that any code post-dominated
+                    # by an `unreachable` must either be dead or contain a statically-known
+                    # throw().
+                    #
+                    # This can be useful in, e.g., cases where Julia codegen knows that a
+                    # dynamic dispatch is must-throw but the LLVM IR does not otherwise
+                    # reflect this information.
                     position!(builder, LLVM.at_end(block))
                     brinst = br!(builder, any_throw)
                 end
-
-                # `catch`: Add pseudo-edge from any_catch
-                if decl.name == "__sigsetjmp" || decl.name == "sigsetjmp"
-                    icmp_ = only(inst.users) # Asserts one usage
-                    @assert icmp_ isa LLVM.ICmpInst
-                    @assert convert(Int, icmp_.operands[2]) == 0
-                    for br_ in icmp_.users
-                        @assert br_ isa LLVM.BrInst
-
-                        # Rewrite the jump to this `catch` block as an indirect jump
-                        # from a common `any_catch` block
-                        _, catch_target = br_.successors
-                        br_.successors[2] = any_catch
-                        branch_index = ConstantInt(Int32(length(catch_switch.successors)))
-                        push!(catch_switch.cases, (branch_index, catch_target))
-                    end
-                end
-            elseif isa(inst, LLVM.UnreachableInst)
-
-                # By assuming forward-progress, we know that any code post-dominated
-                # by an `unreachable` must either be dead or contain a statically-known
-                # throw().
-                #
-                # This can be useful in, e.g., cases where Julia codegen knows that a
-                # dynamic dispatch is must-throw but the LLVM IR does not otherwise
-                # reflect this information.
-                position!(builder, LLVM.at_end(block))
-                brinst = br!(builder, any_throw)
             end
         end
+
+        throw_ret, catch_switch
     end
-    dispose(builder)
 
     # Return the "any_throw" and "any_catch" instructions so that they
     # can be used for (post-)dominance tests.
@@ -116,60 +117,58 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
         f = pop!(worklist)
 
         throw_, catch_ = rename_calls_and_throws!(f, mod)
-        domtree = LLVM.DomTree(f)
-        postdomtree = LLVM.PostDomTree(f)
-        for block in f.blocks
-            for inst in block.instructions
-                if isa(inst, LLVM.CallInst)
-                    decl = inst.called_operand
+        @dispose domtree=LLVM.DomTree(f) postdomtree=LLVM.PostDomTree(f) begin
+            for block in f.blocks
+                for inst in block.instructions
+                    if isa(inst, LLVM.CallInst)
+                        decl = inst.called_operand
 
-                    throw_only = dominates(postdomtree, throw_, inst)
-                    ignore_throw && throw_only && continue
+                        throw_only = dominates(postdomtree, throw_, inst)
+                        ignore_throw && throw_only && continue
 
-                    catch_only = dominates(domtree, catch_, inst)
-                    ignore_throw && catch_only && continue
+                        catch_only = dominates(domtree, catch_, inst)
+                        ignore_throw && catch_only && continue
 
-                    class, may_allocate = classify_runtime_fn(decl.name; ignore_throw)
+                        class, may_allocate = classify_runtime_fn(decl.name; ignore_throw)
 
-                    if class === :alloc
-                        allocs = resolve_allocations(inst)
-                        if allocs === nothing # TODO: failed to resolve
-                            bt = backtrace_(inst; compiled)
-                            push!(errors, AllocationSite(Any, bt))
-                        else
-                            for (inst_, typ) in allocs
+                        if class === :alloc
+                            allocs = resolve_allocations(inst)
+                            if allocs === nothing # TODO: failed to resolve
+                                bt = backtrace_(inst; compiled)
+                                push!(errors, AllocationSite(Any, bt))
+                            else
+                                for (inst_, typ) in allocs
 
-                                throw_only = dominates(postdomtree, throw_, inst_)
-                                ignore_throw && throw_only && continue
+                                    throw_only = dominates(postdomtree, throw_, inst_)
+                                    ignore_throw && throw_only && continue
 
-                                catch_only = dominates(domtree, catch_, inst_)
-                                ignore_throw && catch_only && continue
+                                    catch_only = dominates(domtree, catch_, inst_)
+                                    ignore_throw && catch_only && continue
 
-                                bt = backtrace_(inst_; compiled)
-                                push!(errors, AllocationSite(typ, bt))
+                                    bt = backtrace_(inst_; compiled)
+                                    push!(errors, AllocationSite(typ, bt))
+                                end
                             end
+                            @assert may_allocate
+                        elseif class === :dispatch
+                            fname = resolve_dispatch_target(inst)
+                            bt = backtrace_(inst; compiled)
+                            push!(errors, DynamicDispatch(bt, fname))
+                            @assert may_allocate
+                        elseif class === :runtime && may_allocate
+                            bt = backtrace_(inst; compiled)
+                            fname = replace(decl.name, r"^ijl_"=>"jl_")
+                            push!(errors, AllocatingRuntimeCall(fname, bt))
                         end
-                        @assert may_allocate
-                    elseif class === :dispatch
-                        fname = resolve_dispatch_target(inst)
-                        bt = backtrace_(inst; compiled)
-                        push!(errors, DynamicDispatch(bt, fname))
-                        @assert may_allocate
-                    elseif class === :runtime && may_allocate
-                        bt = backtrace_(inst; compiled)
-                        fname = replace(decl.name, r"^ijl_"=>"jl_")
-                        push!(errors, AllocatingRuntimeCall(fname, bt))
-                    end
 
-                    if decl isa LLVM.Function && !isdeclaration(decl) && !in(decl, seen)
-                        push!(worklist, decl)
-                        push!(seen, decl)
+                        if decl isa LLVM.Function && !isdeclaration(decl) && !in(decl, seen)
+                            push!(worklist, decl)
+                            push!(seen, decl)
+                        end
                     end
                 end
             end
         end
-        dispose(postdomtree)
-        dispose(domtree)
     end
 
     # TODO: dispose(mod)
