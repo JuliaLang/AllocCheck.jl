@@ -82,9 +82,9 @@ function unwrap_ptr_casts(val::LLVM.Value)
         is_simple_cast = false
         is_simple_cast |= isa(val, LLVM.BitCastInst)
         is_simple_cast |= isa(val, LLVM.AddrSpaceCastInst) || isa(val, LLVM.PtrToIntInst)
-        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.API.LLVMAddrSpaceCast
-        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.API.LLVMIntToPtr
-        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.API.LLVMBitCast
+        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.Opcode.AddrSpaceCast
+        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.Opcode.IntToPtr
+        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.Opcode.BitCast
 
         if !is_simple_cast
             return val
@@ -291,11 +291,17 @@ function rename_call!(call::LLVM.CallInst, mod::LLVM.Module)
     end
 
     # Re-write function call to use a locally-created version with a nice name
-    lfn = LLVM.API.LLVMGetNamedFunction(mod, fname)
-    if lfn == C_NULL
-        lfn = LLVM.API.LLVMAddFunction(mod, Symbol(fname), LLVM.API.LLVMGetCalledFunctionType(call))
+    lfn = get(mod.functions, fname, nothing)
+    if lfn === nothing
+        # if another kind of global (e.g. from `llvmcall` IR) uses the name, LLVM renames the
+        # new declaration
+        lfn = LLVM.Function(mod, fname, call.called_type)
     end
-    LLVM.API.LLVMSetOperand(call, LLVM.API.LLVMGetNumOperands(call) - 1, lfn)
+    # all calls to unknown function pointers get the same `jl_unknown_fptr` callee, whatever
+    # their signature. with typed pointers (Julia 1.10 and 1.11), `call.called_operand = lfn`
+    # rejects a callee of another type, so replace the callee operand directly: the module
+    # is only analyzed, not compiled, so the mismatch doesn't matter.
+    call.operands[end] = lfn
 
     return nothing
 end

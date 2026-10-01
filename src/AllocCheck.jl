@@ -61,7 +61,7 @@ function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
                         _, catch_target = br_.successors
                         br_.successors[2] = any_catch
                         branch_index = ConstantInt(Int32(length(catch_switch.successors)))
-                        LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
+                        push!(catch_switch.cases, (branch_index, catch_target))
                     end
                 end
             elseif isa(inst, LLVM.UnreachableInst)
