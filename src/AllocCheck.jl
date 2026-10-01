@@ -60,7 +60,7 @@ function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
                         # from a common `any_catch` block
                         _, catch_target = br_.successors
                         br_.successors[2] = any_catch
-                        branch_index = ConstantInt(length(catch_switch.successors))
+                        branch_index = ConstantInt(Int32(length(catch_switch.successors)))
                         LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
                     end
                 end
