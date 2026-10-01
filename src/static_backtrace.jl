@@ -12,22 +12,22 @@ function backtrace_(inst::LLVM.Instruction, bt=StackTraces.StackFrame[]; compile
             break
         end
         push!(done, inst)
-        f = LLVM.parent(LLVM.parent(inst))
+        f = inst.parent.parent
 
         # look up the debug information from the current instruction
-        if haskey(metadata(inst), LLVM.MD_dbg)
-            loc = metadata(inst)[LLVM.MD_dbg]
+        if haskey(inst.metadata, LLVM.MD_dbg)
+            loc = inst.metadata[LLVM.MD_dbg]
             while loc !== nothing
-                scope = LLVM.scope(loc)
+                scope = loc.scope
                 if scope !== nothing
-                    emitted_name = LLVM.name(f)
-                    name = replace(LLVM.name(scope), r";$" => "")
-                    file = LLVM.file(scope)
-                    path = joinpath(LLVM.directory(file), LLVM.filename(file))
-                    line = LLVM.line(loc)
+                    emitted_name = f.name
+                    name = replace(scope.name, r";$" => "")
+                    file = scope.file
+                    path = joinpath(file.directory, file.filename)
+                    line = loc.line
                     linfo = nothing
                     from_c = false
-                    inlined = LLVM.inlined_at(loc) !== nothing
+                    inlined = loc.inlined_at !== nothing
                     !inlined && for (mi, (; ci, func, specfunc)) in compiled
                         if safe_name(func) == emitted_name || safe_name(specfunc) == emitted_name
                             linfo = mi
@@ -37,23 +37,23 @@ function backtrace_(inst::LLVM.Instruction, bt=StackTraces.StackFrame[]; compile
                     push!(bt, StackTraces.StackFrame(Symbol(name), Symbol(path), line,
                         linfo, from_c, inlined, 0))
                 end
-                loc = LLVM.inlined_at(loc)
+                loc = loc.inlined_at
             end
         end
 
         # move up the call chain
         ## functions can be used as a *value* in eg. constant expressions, so filter those out
-        callers = filter(val -> isa(user(val), LLVM.CallInst), collect(uses(f)))
+        callers = filter(val -> isa(val.user, LLVM.CallInst), collect(f.uses))
         ## get rid of calls without debug info
         filter!(callers) do call
-            md = metadata(user(call))
+            md = call.user.metadata
             haskey(md, LLVM.MD_dbg)
         end
         if !isempty(callers)
             # figure out the call sites of this instruction
             call_sites = unique(callers) do call
                 # there could be multiple calls, originating from the same source location
-                md = metadata(user(call))
+                md = call.user.metadata
                 md[LLVM.MD_dbg]
             end
 
@@ -61,7 +61,7 @@ function backtrace_(inst::LLVM.Instruction, bt=StackTraces.StackFrame[]; compile
                 frame = StackTraces.StackFrame("multiple call sites", "unknown", 0)
                 push!(bt, frame)
             elseif length(call_sites) == 1
-                inst = user(first(call_sites))
+                inst = first(call_sites).user
                 continue
             end
         end

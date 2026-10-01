@@ -3,8 +3,7 @@ module AllocCheck
 import LLVM, GPUCompiler
 using GPUCompiler: JuliaContext, safe_name
 using LLVM: BasicBlock, ConstantExpr, ConstantInt, InlineAsm, IRBuilder, UndefValue,
-            blocks, br!, called_operand, dispose, dominates, instructions, metadata,
-            name, opcode, operands, position!, ret!, successors, switch!, uses, user
+            br!, dispose, dominates, isdeclaration, position!, ret!, switch!
 
 include("static_backtrace.jl")
 include("classify.jl")
@@ -30,39 +29,38 @@ function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
 
     builder = IRBuilder()
 
-    position!(builder, any_throw)
+    position!(builder, LLVM.at_end(any_throw))
     throw_ret = ret!(builder)                                # Dummy inst for post-dominance test
 
-    position!(builder, any_catch)
+    position!(builder, LLVM.at_end(any_catch))
     undef_i32 = UndefValue(LLVM.Int32Type())
     catch_switch = switch!(builder, undef_i32, any_catch, 0) # Dummy inst for dominance test
 
-    for block in blocks(f)
-        for inst in instructions(block)
+    for block in f.blocks
+        for inst in block.instructions
             if isa(inst, LLVM.CallInst)
                 rename_call!(inst, mod)
-                decl = called_operand(inst)
+                decl = inst.called_operand
 
                 # `throw`: Add pseudo-edge to any_throw
-                if name(decl) == "ijl_throw" || name(decl) == "llvm.trap"
-                    position!(builder, block)
+                if decl.name == "ijl_throw" || decl.name == "llvm.trap"
+                    position!(builder, LLVM.at_end(block))
                     brinst = br!(builder, any_throw)
                 end
 
                 # `catch`: Add pseudo-edge from any_catch
-                if name(decl) == "__sigsetjmp" || name(decl) == "sigsetjmp"
-                    icmp_ = user(only(uses(inst))) # Asserts one usage
+                if decl.name == "__sigsetjmp" || decl.name == "sigsetjmp"
+                    icmp_ = only(inst.users) # Asserts one usage
                     @assert icmp_ isa LLVM.ICmpInst
-                    @assert convert(Int, operands(icmp_)[2]) == 0
-                    for br_ in uses(icmp_)
-                        br_ = user(br_)
+                    @assert convert(Int, icmp_.operands[2]) == 0
+                    for br_ in icmp_.users
                         @assert br_ isa LLVM.BrInst
 
                         # Rewrite the jump to this `catch` block as an indirect jump
                         # from a common `any_catch` block
-                        _, catch_target = successors(br_)
-                        successors(br_)[2] = any_catch
-                        branch_index = ConstantInt(length(successors(catch_switch)))
+                        _, catch_target = br_.successors
+                        br_.successors[2] = any_catch
+                        branch_index = ConstantInt(length(catch_switch.successors))
                         LLVM.API.LLVMAddCase(catch_switch, branch_index, catch_target)
                     end
                 end
@@ -75,7 +73,7 @@ function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
                 # This can be useful in, e.g., cases where Julia codegen knows that a
                 # dynamic dispatch is must-throw but the LLVM IR does not otherwise
                 # reflect this information.
-                position!(builder, block)
+                position!(builder, LLVM.at_end(block))
                 brinst = br!(builder, any_throw)
             end
         end
@@ -96,17 +94,17 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
     (; entry, compiled) = meta
 
     errors = []
-    entry = LLVM.ModuleFunctionSet(mod)[entry_name]
+    entry = mod.functions[entry_name]
     worklist = LLVM.Function[ entry ]
     seen = LLVM.Function[ entry ]
     if invoke_entry
-        @assert startswith(name(entry), "jfptr")
+        @assert startswith(entry.name, "jfptr")
         f = pop!(worklist)
-        for block in blocks(f)
-            for inst in instructions(block)
+        for block in f.blocks
+            for inst in block.instructions
                 if isa(inst, LLVM.CallInst)
-                    decl = called_operand(inst)
-                    if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
+                    decl = inst.called_operand
+                    if decl isa LLVM.Function && !isdeclaration(decl) && !in(decl, seen)
                         push!(worklist, decl)
                         push!(seen, decl)
                     end
@@ -120,10 +118,10 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
         throw_, catch_ = rename_calls_and_throws!(f, mod)
         domtree = LLVM.DomTree(f)
         postdomtree = LLVM.PostDomTree(f)
-        for block in blocks(f)
-            for inst in instructions(block)
+        for block in f.blocks
+            for inst in block.instructions
                 if isa(inst, LLVM.CallInst)
-                    decl = called_operand(inst)
+                    decl = inst.called_operand
 
                     throw_only = dominates(postdomtree, throw_, inst)
                     ignore_throw && throw_only && continue
@@ -131,7 +129,7 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
                     catch_only = dominates(domtree, catch_, inst)
                     ignore_throw && catch_only && continue
 
-                    class, may_allocate = classify_runtime_fn(name(decl); ignore_throw)
+                    class, may_allocate = classify_runtime_fn(decl.name; ignore_throw)
 
                     if class === :alloc
                         allocs = resolve_allocations(inst)
@@ -159,11 +157,11 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
                         @assert may_allocate
                     elseif class === :runtime && may_allocate
                         bt = backtrace_(inst; compiled)
-                        fname = replace(name(decl), r"^ijl_"=>"jl_")
+                        fname = replace(decl.name, r"^ijl_"=>"jl_")
                         push!(errors, AllocatingRuntimeCall(fname, bt))
                     end
 
-                    if decl isa LLVM.Function && length(blocks(decl)) > 0 && !in(decl, seen)
+                    if decl isa LLVM.Function && !isdeclaration(decl) && !in(decl, seen)
                         push!(worklist, decl)
                         push!(seen, decl)
                     end
@@ -221,7 +219,7 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
     allocs = JuliaContext() do ctx
         mod, meta = GPUCompiler.compile(:llvm, job)
         (; entry, compiled) = meta
-        entry_name = name(entry)
+        entry_name = entry.name
         optimize!(mod)
 
         allocs = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=false)

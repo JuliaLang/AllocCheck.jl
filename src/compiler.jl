@@ -1,23 +1,25 @@
 import LLVM, GPUCompiler
-using LLVM: @dispose
-using GPUCompiler: CompilerConfig, CompilerJob, MemoryBuffer, NativeCompilerTarget, JuliaContext, ThreadSafeContext, run!
+using LLVM: @dispose, DynamicLibrarySearchGenerator, JITDylib, MemoryBuffer, ThreadSafeContext,
+            ThreadSafeModule, add!, lookup, run!
+using GPUCompiler: CompilerConfig, CompilerJob, NativeCompilerTarget, JuliaContext
 
 include("compiler_utils.jl")
 
 function __init__()
     lljit = LLVM.JuliaOJIT()
 
-    jd_main = LLVM.JITDylib(lljit)
+    if !LLVM.supports_jit_dylib_creation(lljit)
+        jd_main = lljit.external_dylib
 
-    prefix = LLVM.get_prefix(lljit)
-    dg = LLVM.CreateDynamicLibrarySearchGeneratorForProcess(prefix)
-    LLVM.add!(jd_main, dg)
+        dg = DynamicLibrarySearchGenerator(lljit)
+        add!(jd_main, dg)
 
-    # TODO: Do we need this trick from Enzyme?
-    # if Sys.iswindows() && Int === Int64
-        # # TODO can we check isGNU?
-        # define_absolute_symbol(jd_main, mangle(lljit, "___chkstk_ms"))
-    # end
+        # TODO: Do we need this trick from Enzyme?
+        # if Sys.iswindows() && Int === Int64
+            # # TODO can we check isGNU?
+            # define_absolute_symbol(jd_main, mangle(lljit, "___chkstk_ms"))
+        # end
+    end
 
     jit[] = CompilerInstance(lljit)
 end
@@ -25,6 +27,19 @@ end
 struct CompilerInstance
     jit::LLVM.JuliaOJIT
 end
+
+# the JITDylib to add a compiled module to. before Julia 1.14, that's the single JITDylib
+# that all users of Julia's JIT share. on Julia 1.14, which supports creating JITDylibs,
+# the names that Julia generates for a module (e.g. `jfptr_*`) can occur in other modules
+# too, so every module needs a JITDylib of its own.
+function module_dylib(lljit::LLVM.JuliaOJIT)
+    if LLVM.supports_jit_dylib_creation(lljit)
+        JITDylib(lljit, "AllocCheck")
+    else
+        lljit.external_dylib
+    end
+end
+
 struct CompileResult{Success, F, TT, RT}
     f_ptr::Ptr{Cvoid}
     arg_types::Type{TT}
@@ -76,7 +91,7 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
             return JuliaContext() do ctx
                 mod, meta = GPUCompiler.compile(:llvm, job)
                 (; entry, compiled) = meta
-                entry_name = name(entry)
+                entry_name = entry.name
                 optimize!(mod)
 
                 clone = copy(mod)
@@ -88,14 +103,14 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
         function link(@nospecialize(job::CompilerJob), (mod, entry_name, analysis))
             return JuliaContext() do ctx
                 lljit = jit[].jit
-                jd = LLVM.JITDylib(lljit)
+                jd = module_dylib(lljit)
                 buf = convert(MemoryBuffer, mod)
                 tsm = ThreadSafeContext() do ctx
                     mod = parse(LLVM.Module, buf)
-                    GPUCompiler.ThreadSafeModule(mod)
+                    ThreadSafeModule(mod)
                 end
-                LLVM.add!(lljit, jd, tsm)
-                f_ptr = pointer(LLVM.lookup(lljit, jd, entry_name))
+                add!(lljit, jd, tsm)
+                f_ptr = pointer(lookup(lljit, jd, entry_name))
                 if f_ptr == C_NULL
                     throw(GPUCompiler.InternalCompilerError(job,
                           "Failed to compile @check_allocs function"))

@@ -44,11 +44,11 @@ const generic_method_offsets = Dict{String,Int}(("jl_f__apply_latest" => 2, "ijl
 
 function resolve_dispatch_target(inst::LLVM.Instruction)
     @assert isa(inst, LLVM.CallInst)
-    fun = LLVM.called_operand(inst)
-    if isa(fun, LLVM.Function) && in(LLVM.name(fun), keys(generic_method_offsets))
-        offset = generic_method_offsets[LLVM.name(fun)]
+    fun = inst.called_operand
+    if isa(fun, LLVM.Function) && in(fun.name, keys(generic_method_offsets))
+        offset = generic_method_offsets[fun.name]
         offset == 0 && return nothing
-        flib = operands(inst)[offset]
+        flib = inst.arguments[offset]
         flib = unwrap_ptr_casts(flib)
         flib = look_through_loads(flib)
         if isa(flib, ConstantInt)
@@ -82,24 +82,24 @@ function unwrap_ptr_casts(val::LLVM.Value)
         is_simple_cast = false
         is_simple_cast |= isa(val, LLVM.BitCastInst)
         is_simple_cast |= isa(val, LLVM.AddrSpaceCastInst) || isa(val, LLVM.PtrToIntInst)
-        is_simple_cast |= isa(val, LLVM.ConstantExpr) && opcode(val) == LLVM.API.LLVMAddrSpaceCast
-        is_simple_cast |= isa(val, LLVM.ConstantExpr) && opcode(val) == LLVM.API.LLVMIntToPtr
-        is_simple_cast |= isa(val, LLVM.ConstantExpr) && opcode(val) == LLVM.API.LLVMBitCast
+        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.API.LLVMAddrSpaceCast
+        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.API.LLVMIntToPtr
+        is_simple_cast |= isa(val, LLVM.ConstantExpr) && val.opcode == LLVM.API.LLVMBitCast
 
         if !is_simple_cast
             return val
         else
-            val = operands(val)[1]
+            val = val.operands[1]
         end
     end
 end
 
 function look_through_loads(val::LLVM.Value)
     if isa(val, LLVM.LoadInst)
-        val = operands(val)[1]
+        val = val.pointer_operand
         val = unwrap_ptr_casts(val)
         if isa(val, LLVM.GlobalVariable)
-            val = LLVM.initializer(val)
+            val = val.initializer
             val = unwrap_ptr_casts(val)
         end
     end
@@ -144,9 +144,9 @@ end
 
 function transitive_uses(inst::LLVM.Instruction; unwrap = (use)->false)
     uses_ = LLVM.Use[]
-    for use in uses(inst)
+    for use in inst.uses
         if unwrap(use)
-            append!(uses_, transitive_uses(user(use); unwrap))
+            append!(uses_, transitive_uses(use.user; unwrap))
         else
             push!(uses_, use)
         end
@@ -162,9 +162,9 @@ Returns `nothing` if the type could not be resolved statically.
 function resolve_allocations(call::LLVM.Value)
     @assert isa(call, LLVM.CallInst)
 
-    fn = LLVM.called_operand(call)
+    fn = call.called_operand
     !isa(fn, LLVM.Function) && return nothing
-    name = LLVM.name(fn)
+    name = fn.name
 
     # Strip off the "jl_" or "ijl_" prefix
     match_ = match(r"^(ijl_|jl_)(.*)$", name)
@@ -172,10 +172,10 @@ function resolve_allocations(call::LLVM.Value)
     name = match_[2]
 
     if name in ("gc_pool_alloc_instrumented", "gc_small_alloc_instrumented", "gc_big_alloc_instrumented", "gc_alloc_typed")
-        type = resolve_static_type_tag(operands(call)[end-1])
+        type = resolve_static_type_tag(call.arguments[end])
         return type !== nothing ? [(call, type)] : nothing
     elseif name in ("alloc_array_1d", "alloc_array_2d", "alloc_array_3d")
-        type = resolve_static_jl_value(operands(call)[1])
+        type = resolve_static_jl_value(call.arguments[1])
         return type!== nothing ? [(call, type)] : nothing
     elseif name == "alloc_string"
         return [(call, String)]
@@ -188,10 +188,10 @@ function resolve_allocations(call::LLVM.Value)
         @assert VERSION > v"1.11.0-DEV.753"
         return [(call, Memory{UInt8})]
     elseif name == "alloc_genericmemory"
-        type = resolve_static_jl_value(operands(call)[1])
+        type = resolve_static_jl_value(call.arguments[1])
         return [(call, type !== nothing ? type : Memory)]
     elseif name == "alloc_genericmemory_unchecked"
-        type = resolve_static_jl_value(operands(call)[3])
+        type = resolve_static_jl_value(call.arguments[3])
         return [(call, type !== nothing ? type : Memory)]
     elseif occursin(r"^box_(.*)", name)
         typestr = match(r"^box_(.*)", name).captures[end]
@@ -215,12 +215,12 @@ function resolve_allocations(call::LLVM.Value)
     elseif name in ("gc_pool_alloc", "gc_small_alloc")
         seen = Set()
         allocs = Tuple{LLVM.Instruction, Any}[]
-        for calluse in transitive_uses(call; unwrap = (use)->user(use) isa LLVM.BitCastInst)
-            gep = user(calluse)
+        for calluse in transitive_uses(call; unwrap = (use)->use.user isa LLVM.BitCastInst)
+            gep = calluse.user
             !isa(gep, LLVM.GetElementPtrInst) && continue
 
             # Check that this points into the type tag (at a -1 offset)
-            offset = operands(gep)[2]
+            offset = gep.operands[2]
             !isa(offset, LLVM.ConstantInt) && continue
             offset = convert(Int, offset)
 
@@ -228,14 +228,13 @@ function resolve_allocations(call::LLVM.Value)
             (offset != -1 && offset != -8) && continue
 
             # Now, look for the store into the type tag and count that as our allocation(s)
-            for gepuse in uses(gep)
-                store = user(gepuse)
+            for store in gep.users
                 !isa(store, LLVM.StoreInst) && continue
 
                 # It is possible for the optimizer to merge multiple distinct `gc_pool_alloc`
                 # allocations which actually have distinct types, so here we count each type
                 # tag store as a separate allocation.
-		type = resolve_static_type_tag(operands(store)[1])
+		type = resolve_static_type_tag(store.value_operand)
                 if type === nothing
                     type = Any
                 end
@@ -257,11 +256,11 @@ and replace it with a new locally-declared function that has the
 resolved name as its identifier.
 """
 function rename_call!(call::LLVM.CallInst, mod::LLVM.Module)
-    callee = called_operand(call)
+    callee = call.called_operand
     if isa(callee, LLVM.LoadInst)
 
-        fn_got = unwrap_ptr_casts(operands(callee)[1])
-        fname = name(fn_got)
+        fn_got = unwrap_ptr_casts(callee.pointer_operand)
+        fname = fn_got.name
         match_ = match(r"^jlplt_(.*)_\d+_got$", fname)
         match_ === nothing && return
 
