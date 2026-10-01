@@ -1,6 +1,6 @@
 import LLVM, GPUCompiler
-using LLVM: @dispose, DynamicLibrarySearchGenerator, JITDylib, MemoryBuffer, ThreadSafeContext,
-            ThreadSafeModule, add!, lookup, run!
+using LLVM: @dispose, DynamicLibrarySearchGenerator, JITDylib, ThreadSafeModule, add!, lookup,
+            run!
 using GPUCompiler: CompilerConfig, CompilerJob, NativeCompilerTarget, JuliaContext
 
 include("compiler_utils.jl")
@@ -94,21 +94,20 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
                 entry_name = entry.name
                 optimize!(mod)
 
-                clone = copy(mod)
+                # serialize the module before `find_allocs!` trashes it. return its bitcode rather
+                # than the module, which is disposed of together with the context at the end of
+                # this block
+                bitcode = convert(Vector{UInt8}, mod)
                 analysis = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=true)
                 # TODO: This is the wrong meta
-                return clone, entry_name, analysis
+                return bitcode, entry_name, analysis
             end
         end
-        function link(@nospecialize(job::CompilerJob), (mod, entry_name, analysis))
+        function link(@nospecialize(job::CompilerJob), (bitcode, entry_name, analysis))
             return JuliaContext() do ctx
                 lljit = jit[].jit
                 jd = module_dylib(lljit)
-                buf = convert(MemoryBuffer, mod)
-                tsm = ThreadSafeContext() do ctx
-                    mod = parse(LLVM.Module, buf)
-                    ThreadSafeModule(mod)
-                end
+                tsm = ThreadSafeModule(parse(LLVM.Module, bitcode))
                 add!(lljit, jd, tsm)
                 f_ptr = pointer(lookup(lljit, jd, entry_name))
                 if f_ptr == C_NULL
