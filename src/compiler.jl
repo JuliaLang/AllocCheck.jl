@@ -1,15 +1,10 @@
 import LLVM, GPUCompiler
-using LLVM: TargetMachine, @dispose
+using LLVM: @dispose
 using GPUCompiler: CompilerConfig, CompilerJob, MemoryBuffer, NativeCompilerTarget, JuliaContext, ThreadSafeContext, run!
 
 include("compiler_utils.jl")
 
 function __init__()
-    opt_level = Base.JLOptions().opt_level
-
-    tm[] = LLVM.JITTargetMachine(LLVM.triple(), cpu_name(), cpu_features();
-                                 optlevel = llvm_codegen_level(opt_level))
-    LLVM.asm_verbosity!(tm[], true)
     lljit = LLVM.JuliaOJIT()
 
     jd_main = LLVM.JITDylib(lljit)
@@ -24,21 +19,11 @@ function __init__()
         # define_absolute_symbol(jd_main, mangle(lljit, "___chkstk_ms"))
     # end
 
-    es = LLVM.ExecutionSession(lljit)
-    try
-        lctm = LLVM.LocalLazyCallThroughManager(GPUCompiler.triple(lljit), es)
-        ism = LLVM.LocalIndirectStubsManager(GPUCompiler.triple(lljit))
-        jit[] = CompilerInstance(lljit, lctm, ism)
-    catch err
-        @warn "OrcV2 initialization failed with" err
-        jit[] = CompilerInstance(lljit, nothing, nothing)
-    end
+    jit[] = CompilerInstance(lljit)
 end
 
 struct CompilerInstance
     jit::LLVM.JuliaOJIT
-    lctm::Union{LLVM.LazyCallThroughManager, Nothing}
-    ism::Union{LLVM.IndirectStubsManager, Nothing}
 end
 struct CompileResult{Success, F, TT, RT}
     f_ptr::Ptr{Cvoid}
@@ -51,7 +36,6 @@ end
 # lock + JIT objects
 const codegen_lock = ReentrantLock()
 const jit = Ref{CompilerInstance}()
-const tm = Ref{TargetMachine}() # for opt pipeline
 
 # cache of kernel instances
 const _kernel_instances = Dict{Any, Any}()

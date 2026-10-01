@@ -7,7 +7,6 @@ using LLVM: BasicBlock, ConstantExpr, ConstantInt, InlineAsm, IRBuilder, UndefVa
             name, opcode, operands, position!, ret!, successors, switch!, uses, user
 
 include("static_backtrace.jl")
-include("abi_call.jl")
 include("classify.jl")
 include("compiler.jl")
 include("macro.jl")
