@@ -171,9 +171,6 @@ function find_allocs!(mod::LLVM.Module, meta, entry_name::String; ignore_throw=t
         end
     end
 
-    # TODO: dispose(mod)
-    # dispose(mod)
-
     unique!(errors)
     return errors
 end
@@ -217,14 +214,15 @@ function check_allocs(@nospecialize(func), @nospecialize(types); ignore_throw=tr
     job = CompilerJob(source, config)
     allocs = JuliaContext() do ctx
         mod, meta = GPUCompiler.compile(:llvm, job)
-        (; entry, compiled) = meta
-        entry_name = entry.name
-        optimize!(mod)
+        @dispose mod=mod begin
+            (; entry, compiled) = meta
+            entry_name = entry.name
+            optimize!(mod)
 
-        allocs = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=false)
-        # display(mod)
-        # dispose(mod)
-        allocs
+            allocs = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=false)
+            # display(mod)
+            allocs
+        end
     end
     return allocs
 end

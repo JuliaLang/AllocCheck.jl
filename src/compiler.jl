@@ -90,17 +90,19 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
         function compile(@nospecialize(job::CompilerJob))
             return JuliaContext() do ctx
                 mod, meta = GPUCompiler.compile(:llvm, job)
-                (; entry, compiled) = meta
-                entry_name = entry.name
-                optimize!(mod)
+                @dispose mod=mod begin
+                    (; entry, compiled) = meta
+                    entry_name = entry.name
+                    optimize!(mod)
 
-                # serialize the module before `find_allocs!` trashes it. return its bitcode rather
-                # than the module, which is disposed of together with the context at the end of
-                # this block
-                bitcode = convert(Vector{UInt8}, mod)
-                analysis = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=true)
-                # TODO: This is the wrong meta
-                return bitcode, entry_name, analysis
+                    # serialize the module before `find_allocs!` trashes it. return its bitcode
+                    # rather than the module, which is disposed of at the end of this block
+                    bitcode = convert(Vector{UInt8}, mod)
+                    analysis = find_allocs!(mod, meta, entry_name; ignore_throw,
+                                            invoke_entry=true)
+                    # TODO: This is the wrong meta
+                    bitcode, entry_name, analysis
+                end
             end
         end
         function link(@nospecialize(job::CompilerJob), (bitcode, entry_name, analysis))
