@@ -361,3 +361,60 @@ end
     # issue #96
     @test length(check_allocs(svec_alloc, (ErrorException,))) > 0
 end
+
+# non-allocating, but each carries a relocation for the same `Symbol`
+reloc_probe_a(x::Symbol) = x === :reloc_probe
+reloc_probe_b(x::Symbol) = x === :reloc_probe
+entry_probe(x::Float64) = x + 1
+entry_probe(x::Float32) = x - 1
+
+@testset "relocation patching" begin
+    # A compiled result is cached as a machine-code object plus one word per host reference,
+    # which `link_result` writes into the loaded image after adding it. That is what lets a
+    # later session — or a package image — start the code with no compiler at all, but it
+    # only works if those words actually land.
+    ra = AllocCheck.compile_callable(reloc_probe_a, Tuple{Symbol})
+    rb = AllocCheck.compile_callable(reloc_probe_b, Tuple{Symbol})
+
+    if AllocCheck.GPUCompiler.supports_relocatable_ir()
+        # Both results reference `:reloc_probe`, and both objects are loaded into the same
+        # JITDylib, so they must not name that word identically — the second `add!` would be
+        # a duplicate definition. GPUCompiler namespaces relocation names per compiler job,
+        # which makes that true by construction; assert the guarantee holds.
+        names(r) = Set(rec.name for rec in r.roots.relocations.records)
+        @test !isempty(names(ra)) && !isempty(names(rb))
+        @test isdisjoint(names(ra), names(rb))
+    end
+
+    # a slot left unpatched reads zero and could never match, so these answers are the patch
+    @test ra(:reloc_probe) == true
+    @test ra(:other_probe) == false
+    @test rb(:reloc_probe) == true
+
+    # Julia may give both overloads the same `jfptr_entry_probe_0` codegen name. Cached
+    # objects need signature-derived entry names to coexist and to remain distinct in the
+    # session's link cache.
+    r64 = AllocCheck.compile_callable(entry_probe, Tuple{Float64})
+    r32 = AllocCheck.compile_callable(entry_probe, Tuple{Float32})
+    @test r64.roots.entry != r32.roots.entry
+    @test r64(2.0) === 3.0
+    @test r32(2.0f0) === 1.0f0
+end
+
+@check_allocs returns_bool(x::Float64) = x > 0
+
+@testset "boxed Bool identity" begin
+    valptr(@nospecialize x) = ccall(:jl_value_ptr, Ptr{Cvoid}, (Any,), x)
+
+    # A `@check_allocs` function returns through the boxed `:func` ABI, so a
+    # `Bool` result comes back as the `jl_true`/`jl_false` singleton. Those must
+    # be the runtime's own objects: a module-local replica lives in read-only
+    # data, and the collector segfaults setting mark bits in it once such a
+    # pointer reaches GC-tracked memory.
+    @test valptr(returns_bool(1.0)) == valptr(true)
+    @test valptr(returns_bool(-1.0)) == valptr(false)
+
+    keep = Any[returns_bool(1.0), returns_bool(-1.0)]
+    GC.gc(true)
+    @test keep == Any[true, false]
+end
