@@ -1,45 +1,45 @@
 import LLVM, GPUCompiler
-using LLVM: TargetMachine, @dispose
-using GPUCompiler: CompilerConfig, CompilerJob, MemoryBuffer, NativeCompilerTarget, JuliaContext, ThreadSafeContext, run!
+using LLVM: @dispose, DynamicLibrarySearchGenerator, JITDylib, ThreadSafeModule, add!, lookup,
+            run!
+using GPUCompiler: CompilerConfig, CompilerJob, NativeCompilerTarget, JuliaContext
 
 include("compiler_utils.jl")
 
 function __init__()
-    opt_level = Base.JLOptions().opt_level
-
-    tm[] = LLVM.JITTargetMachine(LLVM.triple(), cpu_name(), cpu_features();
-                                 optlevel = llvm_codegen_level(opt_level))
-    LLVM.asm_verbosity!(tm[], true)
     lljit = LLVM.JuliaOJIT()
 
-    jd_main = LLVM.JITDylib(lljit)
+    if !LLVM.supports_jit_dylib_creation(lljit)
+        jd_main = lljit.external_dylib
 
-    prefix = LLVM.get_prefix(lljit)
-    dg = LLVM.CreateDynamicLibrarySearchGeneratorForProcess(prefix)
-    LLVM.add!(jd_main, dg)
+        dg = DynamicLibrarySearchGenerator(lljit)
+        add!(jd_main, dg)
 
-    # TODO: Do we need this trick from Enzyme?
-    # if Sys.iswindows() && Int === Int64
-        # # TODO can we check isGNU?
-        # define_absolute_symbol(jd_main, mangle(lljit, "___chkstk_ms"))
-    # end
-
-    es = LLVM.ExecutionSession(lljit)
-    try
-        lctm = LLVM.LocalLazyCallThroughManager(GPUCompiler.triple(lljit), es)
-        ism = LLVM.LocalIndirectStubsManager(GPUCompiler.triple(lljit))
-        jit[] = CompilerInstance(lljit, lctm, ism)
-    catch err
-        @warn "OrcV2 initialization failed with" err
-        jit[] = CompilerInstance(lljit, nothing, nothing)
+        # TODO: Do we need this trick from Enzyme?
+        # if Sys.iswindows() && Int === Int64
+            # # TODO can we check isGNU?
+            # define_absolute_symbol(jd_main, mangle(lljit, "___chkstk_ms"))
+        # end
     end
+
+    jit[] = CompilerInstance(lljit)
 end
 
 struct CompilerInstance
     jit::LLVM.JuliaOJIT
-    lctm::Union{LLVM.LazyCallThroughManager, Nothing}
-    ism::Union{LLVM.IndirectStubsManager, Nothing}
 end
+
+# the JITDylib to add a compiled module to. before Julia 1.14, that's the single JITDylib
+# that all users of Julia's JIT share. on Julia 1.14, which supports creating JITDylibs,
+# the names that Julia generates for a module (e.g. `jfptr_*`) can occur in other modules
+# too, so every module needs a JITDylib of its own.
+function module_dylib(lljit::LLVM.JuliaOJIT)
+    if LLVM.supports_jit_dylib_creation(lljit)
+        JITDylib(lljit, "AllocCheck")
+    else
+        lljit.external_dylib
+    end
+end
+
 struct CompileResult{Success, F, TT, RT}
     f_ptr::Ptr{Cvoid}
     arg_types::Type{TT}
@@ -51,7 +51,6 @@ end
 # lock + JIT objects
 const codegen_lock = ReentrantLock()
 const jit = Ref{CompilerInstance}()
-const tm = Ref{TargetMachine}() # for opt pipeline
 
 # cache of kernel instances
 const _kernel_instances = Dict{Any, Any}()
@@ -91,27 +90,28 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
         function compile(@nospecialize(job::CompilerJob))
             return JuliaContext() do ctx
                 mod, meta = GPUCompiler.compile(:llvm, job)
-                (; entry, compiled) = meta
-                entry_name = name(entry)
-                optimize!(mod)
+                @dispose mod=mod begin
+                    (; entry, compiled) = meta
+                    entry_name = entry.name
+                    optimize!(mod)
 
-                clone = copy(mod)
-                analysis = find_allocs!(mod, meta, entry_name; ignore_throw, invoke_entry=true)
-                # TODO: This is the wrong meta
-                return clone, entry_name, analysis
+                    # serialize the module before `find_allocs!` trashes it. return its bitcode
+                    # rather than the module, which is disposed of at the end of this block
+                    bitcode = convert(Vector{UInt8}, mod)
+                    analysis = find_allocs!(mod, meta, entry_name; ignore_throw,
+                                            invoke_entry=true)
+                    # TODO: This is the wrong meta
+                    bitcode, entry_name, analysis
+                end
             end
         end
-        function link(@nospecialize(job::CompilerJob), (mod, entry_name, analysis))
+        function link(@nospecialize(job::CompilerJob), (bitcode, entry_name, analysis))
             return JuliaContext() do ctx
                 lljit = jit[].jit
-                jd = LLVM.JITDylib(lljit)
-                buf = convert(MemoryBuffer, mod)
-                tsm = ThreadSafeContext() do ctx
-                    mod = parse(LLVM.Module, buf)
-                    GPUCompiler.ThreadSafeModule(mod)
-                end
-                LLVM.add!(lljit, jd, tsm)
-                f_ptr = pointer(LLVM.lookup(lljit, jd, entry_name))
+                jd = module_dylib(lljit)
+                tsm = ThreadSafeModule(parse(LLVM.Module, bitcode))
+                add!(lljit, jd, tsm)
+                f_ptr = pointer(lookup(lljit, jd, entry_name))
                 if f_ptr == C_NULL
                     throw(GPUCompiler.InternalCompilerError(job,
                           "Failed to compile @check_allocs function"))
