@@ -28,10 +28,7 @@ struct CompilerInstance
     jit::LLVM.JuliaOJIT
 end
 
-# the JITDylib to add a compiled module to. before Julia 1.14, that's the single JITDylib
-# that all users of Julia's JIT share. on Julia 1.14, which supports creating JITDylibs,
-# the names that Julia generates for a module (e.g. `jfptr_*`) can occur in other modules
-# too, so every module needs a JITDylib of its own.
+# Julia 1.14+: one JITDylib per module, since generated names (`jfptr_*`) can repeat
 function module_dylib(lljit::LLVM.JuliaOJIT)
     if LLVM.supports_jit_dylib_creation(lljit)
         JITDylib(lljit, "AllocCheck")
@@ -95,8 +92,7 @@ function compile_callable(f::F, tt::TT=Tuple{}; ignore_throw=true) where {F, TT}
                     entry_name = entry.name
                     optimize!(mod)
 
-                    # serialize the module before `find_allocs!` trashes it. return its bitcode
-                    # rather than the module, which is disposed of at the end of this block
+                    # serialize before `find_allocs!` mutates the module
                     bitcode = convert(Vector{UInt8}, mod)
                     analysis = find_allocs!(mod, meta, entry_name; ignore_throw,
                                             invoke_entry=true)
