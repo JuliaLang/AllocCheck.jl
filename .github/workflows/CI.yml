@@ -22,6 +22,8 @@ jobs:
           - '1.10'
           - '1.11'
           - '1.12'
+          - '1.13'
+          - 'pre'
           - 'nightly'
         os:
           - ubuntu-latest
@@ -30,6 +32,24 @@ jobs:
         include:
           - version: '1.12'
             os: macos-latest
+            arch: aarch64
+          - version: '1.13'
+            os: macos-latest
+            arch: aarch64
+          - version: 'pre'
+            os: macos-latest
+            arch: aarch64
+          - version: '1.13'
+            os: ubuntu-24.04-arm
+            arch: aarch64
+          - version: 'pre'
+            os: ubuntu-24.04-arm
+            arch: aarch64
+          - version: 'nightly'
+            os: macos-latest
+            arch: aarch64
+          - version: 'nightly'
+            os: ubuntu-24.04-arm
             arch: aarch64
     steps:
       - uses: actions/checkout@v7
