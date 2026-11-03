@@ -14,6 +14,16 @@ include("utils.jl")
 
 module Runtime end
 
+# `try` setjmps use a buffer passed to `jl_enter_handler`; others (e.g. Julia 1.14+
+# cancellation points) are not exception handlers
+function is_try_setjmp(call::LLVM.CallInst)
+    buf = unwrap_ptr_casts(call.arguments[1])
+    return any(buf.users) do u
+        u isa LLVM.CallInst && u.called_operand isa LLVM.Function &&
+            u.called_operand.name in ("jl_enter_handler", "ijl_enter_handler")
+    end
+end
+
 function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
 
     # In order to detect whether an instruction executes only when
@@ -48,7 +58,7 @@ function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
                     end
 
                     # `catch`: Add pseudo-edge from any_catch
-                    if decl.name == "__sigsetjmp" || decl.name == "sigsetjmp"
+                    if (decl.name == "__sigsetjmp" || decl.name == "sigsetjmp") && is_try_setjmp(inst)
                         icmp_ = only(inst.users) # Asserts one usage
                         @assert icmp_ isa LLVM.ICmpInst
                         @assert convert(Int, icmp_.operands[2]) == 0
