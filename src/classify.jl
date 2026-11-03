@@ -22,7 +22,8 @@ function classify_runtime_fn(name::AbstractString; ignore_throw::Bool)
                 "string_to_genericmemory", "ptr_to_genericmemory", "array_copy", "alloc_string",
                 "alloc_array_1d", "alloc_array_2d", "alloc_array_3d", "gc_alloc_typed",
                 "gc_small_alloc", "gc_pool_alloc", "gc_small_alloc_instrumented",
-                "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented"
+                "gc_pool_alloc_instrumented", "gc_big_alloc_instrumented",
+                "gc_small_alloc_reset_safe", "gc_big_alloc_reset_safe", "gc_alloc_typed_reset_safe"
                ) || occursin(r"^box_.*", name)
         return (:alloc, may_alloc)
     elseif name in ("f__apply_latest", "f__apply_iterate", "f__apply_pure", "f__call_latest",
@@ -64,7 +65,8 @@ function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
     if name in ("egal__unboxed", "lock_value", "unlock_value", "get_nth_field_noalloc",
                 "load_and_lookup", "lazy_load_and_lookup", "box_bool", "box_int8",
                 "box_uint8", "excstack_state", "restore_excstack", "enter_handler",
-                "pop_handler", "pop_handler_noexcept", "f_typeof", "clock_now", "throw", "gc_queue_root", "gc_enable",
+                "pop_handler", "pop_handler_noexcept", "f_typeof", "clock_now", "throw", "gc_queue_root",
+                "gc_queue_root_reset_safe", "gc_enable",
                 "gc_disable_finalizers_internal", "gc_is_in_finalizer", "enable_gc_logging",
                 "gc_safepoint", "gc_collect", "genericmemory_owner", "get_pgcstack", "get_pgcstack_static",
                 "get_pgcstack_fallback") || occursin(r"^unbox_.*", name)
@@ -171,7 +173,9 @@ function resolve_allocations(call::LLVM.Value)
     isnothing(match_) && return nothing
     name = match_[2]
 
-    if name in ("gc_pool_alloc_instrumented", "gc_small_alloc_instrumented", "gc_big_alloc_instrumented", "gc_alloc_typed")
+    if name in ("gc_pool_alloc_instrumented", "gc_small_alloc_instrumented", "gc_big_alloc_instrumented",
+                "gc_alloc_typed", "gc_small_alloc_reset_safe", "gc_big_alloc_reset_safe",
+                "gc_alloc_typed_reset_safe")
         type = resolve_static_type_tag(call.arguments[end])
         return type !== nothing ? [(call, type)] : nothing
     elseif name in ("alloc_array_1d", "alloc_array_2d", "alloc_array_3d")
