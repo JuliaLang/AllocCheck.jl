@@ -293,14 +293,14 @@ function rename_call!(call::LLVM.CallInst, mod::LLVM.Module)
     # Re-write function call to use a locally-created version with a nice name
     lfn = get(mod.functions, fname, nothing)
     if lfn === nothing
-        # if another kind of global (e.g. from `llvmcall` IR) uses the name, LLVM renames the
-        # new declaration
+        # move any non-function global (e.g. from `llvmcall`) out of the way, so LLVM
+        # doesn't rename our declaration to `fname.N`
+        gv = get(mod.globals, fname, nothing)
+        gv === nothing || (gv.name = "")
         lfn = LLVM.Function(mod, fname, call.called_type)
     end
-    # all calls to unknown function pointers get the same `jl_unknown_fptr` callee, whatever
-    # their signature. with typed pointers (Julia 1.10 and 1.11), `call.called_operand = lfn`
-    # rejects a callee of another type, so replace the callee operand directly: the module
-    # is only analyzed, not compiled, so the mismatch doesn't matter.
+    # set the operand directly: callee types may mismatch (typed pointers), but this
+    # module is only analyzed
     call.operands[end] = lfn
 
     return nothing

@@ -344,23 +344,15 @@ function svec_alloc(x)
     return Core.svec(x, 1)
 end
 
-# a call through an unknown function pointer, in a module where `llvmcall` IR declares a
-# global with the name used for such calls
-@static if VERSION >= v"1.12-"
-    unknown_fptr_clash(p) = ccall(p, Int, (Int,), Base.llvmcall(("""
-        @jl_unknown_fptr = external global i64
-        define i64 @entry() {
-            %x = ptrtoint ptr @jl_unknown_fptr to i64
-            ret i64 %x
-        }""", "entry"), Int, Tuple{}))
-else
-    unknown_fptr_clash(p) = ccall(p, Int, (Int,), Base.llvmcall(("""
-        @jl_unknown_fptr = external global i64
-        define i64 @entry() {
-            %x = ptrtoint i64* @jl_unknown_fptr to i64
-            ret i64 %x
-        }""", "entry"), Int, Tuple{}))
-end
+# unknown fptr calls where `llvmcall` IR already defines a `jl_unknown_fptr` global
+const fptr_clash_ir = """
+    @jl_unknown_fptr = external global i64
+    define i64 @entry() {
+        %x = ptrtoint $(VERSION >= v"1.12-" ? "ptr" : "i64*") @jl_unknown_fptr to i64
+        ret i64 %x
+    }"""
+unknown_fptr_clash(p, q) =
+    ccall(p, Int, (Int,), ccall(q, Int, (Int,), Base.llvmcall((fptr_clash_ir, "entry"), Int, Tuple{})))
 
 @testset "issues" begin
     # issue #64
@@ -380,5 +372,7 @@ end
     @test length(check_allocs(svec_alloc, (ErrorException,))) > 0
 
     # renaming calls must not clash with other globals
-    @test length(check_allocs(unknown_fptr_clash, (Ptr{Cvoid},))) > 0
+    let allocs = check_allocs(unknown_fptr_clash, (Ptr{Cvoid}, Ptr{Cvoid}))
+        @test only(allocs) isa DynamicDispatch
+    end
 end
