@@ -69,7 +69,7 @@ function fn_may_allocate(name::AbstractString; ignore_throw::Bool)
                 "gc_queue_root_reset_safe", "gc_enable",
                 "gc_disable_finalizers_internal", "gc_is_in_finalizer", "enable_gc_logging",
                 "gc_safepoint", "gc_collect", "genericmemory_owner", "get_pgcstack", "get_pgcstack_static",
-                "get_pgcstack_fallback") || occursin(r"^unbox_.*", name)
+                "get_pgcstack_fallback", "get_pgcstack_resolved") || occursin(r"^unbox_.*", name)
         return false # these functions never allocate
     elseif name in ("f_ifelse", "f_typeassert", "f_is", "f_throw", "f__svec_ref",
                     "genericmemory_copyto")
