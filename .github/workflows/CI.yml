@@ -31,6 +31,12 @@ jobs:
           - x64
         include:
           - version: '1.12'
+            os: windows-latest
+            arch: x64
+          - version: '1.13'
+            os: windows-latest
+            arch: x64
+          - version: '1.12'
             os: macos-latest
             arch: aarch64
           - version: '1.13'
