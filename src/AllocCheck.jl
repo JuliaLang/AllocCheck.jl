@@ -58,7 +58,7 @@ function rename_calls_and_throws!(f::LLVM.Function, mod::LLVM.Module)
                     end
 
                     # `catch`: Add pseudo-edge from any_catch
-                    if (decl.name == "__sigsetjmp" || decl.name == "sigsetjmp") && is_try_setjmp(inst)
+                    if decl.name in ("__sigsetjmp", "sigsetjmp", "ijl_setjmp", "jl_setjmp") && is_try_setjmp(inst)
                         icmp_ = only(inst.users) # Asserts one usage
                         @assert icmp_ isa LLVM.ICmpInst
                         @assert convert(Int, icmp_.operands[2]) == 0
